@@ -5,7 +5,6 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.110+-009688.svg)](https://fastapi.tiangolo.com/)
 [![React 18](https://img.shields.io/badge/React-18-61dafb.svg)](https://reactjs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.2+-3178c6.svg)](https://www.typescriptlang.org/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 > **Production-grade Energy Decision Intelligence MVP** built for UK wholesale electricity trading desks. Evaluates Day-Ahead wind generation forecast accuracy against actual outturns (Elexon BMRS) and automates risk-buffered dispatchable thermal power procurement to safeguard against asymmetric balancing mechanism cashout penalties.
 
@@ -241,10 +240,4 @@ The platform follows modern energy software engineering best practices:
 * **Vectorized Processing**: Analytical metrics (MAE, RMSE, Bias, quantiles) implemented via vectorized NumPy and Pandas for sub-millisecond execution without database bottlenecks.
 * **Resilient Caching**: Dual-tier storage strategy (Apache Parquet columnar files + SQLite) ensuring instantaneous data loads, paired with high-fidelity meteorological fallback simulation.
 * **Test-Driven Rigor**: Comprehensive automated unit and integration tests verifying all statistical formulas, date-time reconciliation, and financial hedging calculations.
-
----
-
-## 9. License
-
-This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.
 
