@@ -37,6 +37,9 @@ dist-ssr/
 *.local
 
 # Cache data
+*.parquet
+*.db
+data/
 backend/data/cache/*.parquet
 backend/data/cache/*.db
 !backend/data/cache/.gitkeep
