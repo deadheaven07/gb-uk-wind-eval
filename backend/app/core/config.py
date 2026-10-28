@@ -28,9 +28,16 @@ class Settings(BaseSettings):
     ELEXON_FUELHH_URL: str = "https://data.elexon.co.uk/bmrs/api/v1/datasets/FUELHH/stream"
     ELEXON_WINDFOR_URL: str = "https://data.elexon.co.uk/bmrs/api/v1/datasets/WINDFOR/stream"
 
-    # Day-Ahead Gate Closure Specification:
-    # Under the Balancing and Settlement Code (BSC) and EPEX/NordPool UK auctions,
-    # Day-Ahead orders close at 11:00 UTC on D-1.
+    # Day-Ahead Auction Deadline vs Intraday Gate Closure Specification:
+    # 1. Day-Ahead wholesale power market auction (EPEX SPOT & Nord Pool UK) order books
+    #    close strictly at 11:00 UTC on Day D-1 (the decision deadline for day-ahead procurement).
+    # 2. Balancing Mechanism (BM) physical Gate Closure occurs strictly 1 hour (60 min)
+    #    prior to the start of each individual half-hour settlement period on Day D.
+    DAY_AHEAD_CUTOFF_HOUR_UTC: int = 11
+    DAY_AHEAD_CUTOFF_MINUTE_UTC: int = 0
+    INTRADAY_GATE_CLOSURE_MINUTES: int = 60
+
+    # Retained for backwards compatibility
     GATE_CLOSURE_HOUR_UTC: int = 11
     GATE_CLOSURE_MINUTE_UTC: int = 0
 

@@ -25,7 +25,7 @@ export const MainChart: React.FC<MainChartProps> = ({ data, isLoading }) => {
   const [peakOnly, setPeakOnly] = useState(false);
   const [selectedRangePreset, setSelectedRangePreset] = useState<string>('all');
 
-  // Filtered dataset based on UI controls
+  // Filtered dataset with confidenceRange tuple for clean Recharts area band rendering
   const chartData = useMemo(() => {
     let filtered = [...data];
 
@@ -44,7 +44,13 @@ export const MainChart: React.FC<MainChartProps> = ({ data, isLoading }) => {
       filtered = filtered.filter(d => d.isPeak);
     }
 
-    return filtered;
+    return filtered.map(d => ({
+      ...d,
+      // Provide range tuple [lower, upper] so Recharts fills strictly between bounds
+      confidenceRange: (d.confidenceLowerMw != null && d.confidenceUpperMw != null)
+        ? [d.confidenceLowerMw, d.confidenceUpperMw]
+        : undefined
+    }));
   }, [data, selectedRangePreset, peakOnly]);
 
   // Formatter for X-axis timestamps
@@ -64,7 +70,8 @@ export const MainChart: React.FC<MainChartProps> = ({ data, isLoading }) => {
       const actual = point.actualMw;
       const da = point.dayAheadForecastMw;
       const error = point.errorMw;
-      const isShortfall = error > 0;
+      const isMissing = da == null;
+      const isShortfall = error != null && error > 0;
 
       return (
         <div className="bg-white/95 backdrop-blur-md p-3.5 rounded-lg shadow-xl border border-slate-200 text-xs w-72">
@@ -76,7 +83,7 @@ export const MainChart: React.FC<MainChartProps> = ({ data, isLoading }) => {
             <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
               point.isPeak ? 'bg-amber-100 text-amber-800' : 'bg-slate-100 text-slate-600'
             }`}>
-              {point.isPeak ? 'PEAK (SP ' + point.settlementPeriod + ')' : 'OFF-PEAK (SP ' + point.settlementPeriod + ')'}
+              {point.isPeak ? `PEAK (SP ${point.settlementPeriod})` : `OFF-PEAK (SP ${point.settlementPeriod})`}
             </span>
           </div>
 
@@ -94,10 +101,16 @@ export const MainChart: React.FC<MainChartProps> = ({ data, isLoading }) => {
                 <span className="h-2.5 w-2.5 rounded-full bg-amber-600 inline-block" />
                 Day-Ahead (11:00 D-1):
               </span>
-              <strong className="text-amber-800 font-bold">{da.toLocaleString()} MW</strong>
+              {isMissing ? (
+                <span className="text-amber-800 font-sans italic text-[11px] px-1.5 py-0.5 bg-amber-50 rounded border border-amber-200">
+                  Missing / Unhedged
+                </span>
+              ) : (
+                <strong className="text-amber-800 font-bold">{da?.toLocaleString()} MW</strong>
+              )}
             </div>
 
-            {showIntraday && (
+            {showIntraday && point.intradayForecastMw != null && (
               <div className="flex items-center justify-between">
                 <span className="flex items-center gap-1.5 text-slate-600 font-sans">
                   <span className="h-2.5 w-2.5 rounded-full bg-teal-600 inline-block" />
@@ -107,12 +120,14 @@ export const MainChart: React.FC<MainChartProps> = ({ data, isLoading }) => {
               </div>
             )}
 
-            <div className="pt-2 border-t border-slate-100 flex items-center justify-between">
-              <span className="text-slate-500 font-sans">Day-Ahead Error:</span>
-              <span className={`font-bold ${isShortfall ? 'text-amber-700' : 'text-blue-700'}`}>
-                {error > 0 ? `+${error.toFixed(0)} MW (Over)` : `${error.toFixed(0)} MW (Under)`}
-              </span>
-            </div>
+            {error != null && (
+              <div className="pt-2 border-t border-slate-100 flex items-center justify-between">
+                <span className="text-slate-500 font-sans">Day-Ahead Error:</span>
+                <span className={`font-bold ${isShortfall ? 'text-amber-700' : 'text-blue-700'}`}>
+                  {error > 0 ? `+${error.toFixed(0)} MW (Over)` : `${error.toFixed(0)} MW (Under)`}
+                </span>
+              </div>
+            )}
           </div>
         </div>
       );
@@ -132,7 +147,7 @@ export const MainChart: React.FC<MainChartProps> = ({ data, isLoading }) => {
   }
 
   return (
-    <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs">
+    <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs transition-shadow duration-200 hover:shadow-sm">
       {/* Chart Header & Controls */}
       <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 pb-4 border-b border-slate-100">
         <div>
@@ -145,7 +160,7 @@ export const MainChart: React.FC<MainChartProps> = ({ data, isLoading }) => {
             </span>
           </div>
           <p className="text-xs text-slate-500 mt-0.5">
-            Compare wholesale delivery with the latest forecast available prior to 11:00 UTC D-1 Gate Closure. Use brush to zoom.
+            Compare wholesale delivery with the latest forecast available prior to 11:00 UTC D-1 Auction Deadline. Use brush slider below to zoom.
           </p>
         </div>
 
@@ -155,77 +170,73 @@ export const MainChart: React.FC<MainChartProps> = ({ data, isLoading }) => {
           <div className="inline-flex rounded-lg border border-slate-200 p-0.5 bg-slate-50">
             <button
               onClick={() => setSelectedRangePreset('all')}
-              className={`px-2.5 py-1 rounded-md font-medium transition-colors ${
+              className={`px-2.5 py-1 rounded-md font-medium transition-all duration-150 cursor-pointer ${
                 selectedRangePreset === 'all'
                   ? 'bg-white text-slate-900 shadow-xs font-semibold'
-                  : 'text-slate-600 hover:text-slate-900'
+                  : 'text-slate-500 hover:text-slate-800'
               }`}
             >
               Full Jan
             </button>
             <button
               onClick={() => setSelectedRangePreset('storm')}
-              className={`px-2.5 py-1 rounded-md font-medium transition-colors ${
+              className={`px-2.5 py-1 rounded-md font-medium transition-all duration-150 cursor-pointer ${
                 selectedRangePreset === 'storm'
                   ? 'bg-white text-slate-900 shadow-xs font-semibold'
-                  : 'text-slate-600 hover:text-slate-900'
+                  : 'text-slate-500 hover:text-slate-800'
               }`}
-              title="Jan 1-7: Storm Gorey / Henk event"
             >
               Storm (1-7)
             </button>
             <button
               onClick={() => setSelectedRangePreset('dunkelflaute')}
-              className={`px-2.5 py-1 rounded-md font-medium transition-colors ${
+              className={`px-2.5 py-1 rounded-md font-medium transition-all duration-150 cursor-pointer ${
                 selectedRangePreset === 'dunkelflaute'
                   ? 'bg-white text-slate-900 shadow-xs font-semibold'
-                  : 'text-slate-600 hover:text-slate-900'
+                  : 'text-slate-500 hover:text-slate-800'
               }`}
-              title="Jan 8-15: Scandinavian Anticyclone / Dunkelflaute Lull"
             >
-              Lull (8-15)
+              Dunkelflaute (8-15)
             </button>
             <button
               onClick={() => setSelectedRangePreset('frontal')}
-              className={`px-2.5 py-1 rounded-md font-medium transition-colors ${
+              className={`px-2.5 py-1 rounded-md font-medium transition-all duration-150 cursor-pointer ${
                 selectedRangePreset === 'frontal'
                   ? 'bg-white text-slate-900 shadow-xs font-semibold'
-                  : 'text-slate-600 hover:text-slate-900'
+                  : 'text-slate-500 hover:text-slate-800'
               }`}
-              title="Jan 16-24: Fast Frontal Transitions"
             >
-              Fronts (16-24)
+              Frontal (16-24)
             </button>
             <button
               onClick={() => setSelectedRangePreset('westerly')}
-              className={`px-2.5 py-1 rounded-md font-medium transition-colors ${
+              className={`px-2.5 py-1 rounded-md font-medium transition-all duration-150 cursor-pointer ${
                 selectedRangePreset === 'westerly'
                   ? 'bg-white text-slate-900 shadow-xs font-semibold'
-                  : 'text-slate-600 hover:text-slate-900'
+                  : 'text-slate-500 hover:text-slate-800'
               }`}
-              title="Jan 25-31: Westerly Flow"
             >
               Westerly (25-31)
             </button>
           </div>
 
           {/* Visibility Toggles */}
-          <div className="flex items-center gap-2 pl-2 border-l border-slate-200">
+          <div className="flex items-center gap-1.5 border-l border-slate-200 pl-2">
             <button
               onClick={() => setShowIntraday(!showIntraday)}
-              className={`px-2 py-1 rounded border flex items-center gap-1 font-medium ${
+              className={`px-2 py-1 rounded border flex items-center gap-1 font-medium transition-all duration-150 cursor-pointer ${
                 showIntraday
                   ? 'bg-teal-50 text-teal-800 border-teal-200'
                   : 'bg-white text-slate-500 border-slate-200'
               }`}
             >
-              <span className="h-2 w-2 rounded-full bg-teal-600" />
+              <span className="h-2 w-2 rounded-full bg-teal-500" />
               Intraday
             </button>
 
             <button
               onClick={() => setShowConfidence(!showConfidence)}
-              className={`px-2 py-1 rounded border flex items-center gap-1 font-medium ${
+              className={`px-2 py-1 rounded border flex items-center gap-1 font-medium transition-all duration-150 cursor-pointer ${
                 showConfidence
                   ? 'bg-blue-50 text-blue-800 border-blue-200'
                   : 'bg-white text-slate-500 border-slate-200'
@@ -237,7 +248,7 @@ export const MainChart: React.FC<MainChartProps> = ({ data, isLoading }) => {
 
             <button
               onClick={() => setPeakOnly(!peakOnly)}
-              className={`px-2 py-1 rounded border flex items-center gap-1 font-medium ${
+              className={`px-2 py-1 rounded border flex items-center gap-1 font-medium transition-all duration-150 cursor-pointer ${
                 peakOnly
                   ? 'bg-amber-50 text-amber-900 border-amber-300 font-semibold'
                   : 'bg-white text-slate-600 border-slate-200'
@@ -285,14 +296,16 @@ export const MainChart: React.FC<MainChartProps> = ({ data, isLoading }) => {
               wrapperStyle={{ fontSize: '11px', paddingBottom: '10px' }}
             />
 
-            {/* Confidence Corridor (Translucent Error Band) */}
+            {/* Uncertainty Corridor Band (Between Lower and Upper Quantiles) */}
             {showConfidence && (
               <Area
                 type="monotone"
-                dataKey="confidenceUpperMw"
+                dataKey="confidenceRange"
                 stroke="none"
-                fill="rgba(59, 130, 246, 0.10)"
-                name="P10-P90 Uncertainty Corridor"
+                fill="rgba(59, 130, 246, 0.14)"
+                name="Empirical P10-P90 Corridor"
+                connectNulls={false}
+                isAnimationActive={false}
               />
             )}
 
@@ -305,9 +318,10 @@ export const MainChart: React.FC<MainChartProps> = ({ data, isLoading }) => {
               strokeWidth={2.2}
               dot={false}
               isAnimationActive={false}
+              connectNulls={false}
             />
 
-            {/* Day-Ahead Gate Closure Forecast (Warm Amber) */}
+            {/* Day-Ahead Auction Cutoff Forecast (Warm Amber) */}
             <Line
               type="monotone"
               dataKey="dayAheadForecastMw"
@@ -317,6 +331,7 @@ export const MainChart: React.FC<MainChartProps> = ({ data, isLoading }) => {
               strokeDasharray="4 2"
               dot={false}
               isAnimationActive={false}
+              connectNulls={false}
             />
 
             {/* Latest Intraday Forecast (Muted Teal) */}
@@ -324,11 +339,12 @@ export const MainChart: React.FC<MainChartProps> = ({ data, isLoading }) => {
               <Line
                 type="monotone"
                 dataKey="intradayForecastMw"
-                name="Latest Intraday Forecast"
+                name="Intraday Forecast (T-1h)"
                 stroke="#0D9488"
                 strokeWidth={1.5}
                 dot={false}
                 isAnimationActive={false}
+                connectNulls={false}
               />
             )}
 
@@ -346,4 +362,3 @@ export const MainChart: React.FC<MainChartProps> = ({ data, isLoading }) => {
     </div>
   );
 };
-

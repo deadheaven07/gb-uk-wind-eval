@@ -57,7 +57,9 @@ export const MetricKpiCards: React.FC<MetricKpiCardsProps> = ({ kpis, isLoading 
           <span className="font-medium text-blue-600 bg-blue-50 px-2 py-0.5 rounded border border-blue-100">
             {kpis.maePct}% of Outturn
           </span>
-          <span className="text-slate-400">1,488 Half-Hours</span>
+          <span className="text-slate-400">
+            {kpis.validSampleCount ?? kpis.sampleCount} SPs {kpis.coveragePct ? `(${kpis.coveragePct}%)` : ''}
+          </span>
         </div>
       </div>
 

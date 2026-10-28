@@ -4,6 +4,7 @@ Gridbricks / REint AI - API v1 Router
 
 Exposes high-performance analytical endpoints for the frontend client:
 - Time Series: Joined Actuals, Day-Ahead Forecast (11:00 UTC D-1), Intraday, and Confidence Bands.
+- Metadata: Provenance, data coverage, cutoff policies, and synthetic-data warnings.
 - KPIs: Executive forecast accuracy metrics (MAE, RMSE, Bias, Peak/Off-Peak).
 - Error Distribution: Parametric & non-parametric error quantiles (P10-P90) + Histogram.
 - Daily Breakdown: Calendar heatmap data and volatility categorization.
@@ -12,8 +13,9 @@ Exposes high-performance analytical endpoints for the frontend client:
 """
 
 from typing import Optional, List
-from fastapi import APIRouter, Query, HTTPException, Depends, Response
+from fastapi import APIRouter, Query, HTTPException, Response
 import pandas as pd
+import numpy as np
 
 from app.schemas.forecast import (
     TimeSeriesResponse,
@@ -23,7 +25,9 @@ from app.schemas.forecast import (
     DailyErrorMetric,
     SettlementPeriodProfile,
     ThermalProcurementRequest,
-    ThermalProcurementResponse
+    ThermalProcurementResponse,
+    DatasetMetadata,
+    DataSourceType
 )
 from app.services.elexon_service import elexon_service
 from app.services.analytics_service import analytics_service
@@ -31,12 +35,22 @@ from app.services.analytics_service import analytics_service
 router = APIRouter()
 
 
-def get_dataset(force_refresh: bool = False) -> tuple[pd.DataFrame, str]:
-    """Dependency helper to load cached or fresh aligned data."""
-    df, status = elexon_service.get_aligned_data(force_refresh=force_refresh)
+def get_dataset(force_refresh: bool = False) -> tuple[pd.DataFrame, DatasetMetadata]:
+    """Dependency helper to load cached or fresh aligned data with structured metadata."""
+    df, meta = elexon_service.get_aligned_data(force_refresh=force_refresh)
     if df.empty:
         raise HTTPException(status_code=500, detail="Failed to load wind generation dataset.")
-    return df, status
+    return df, meta
+
+
+@router.get("/metadata", response_model=DatasetMetadata)
+def get_metadata():
+    """
+    Returns data provenance, source classification (ELEXON_LIVE, CACHE, SYNTHETIC_DEMO),
+    record counts, coverage percentage, and active warning flags.
+    """
+    _, meta = get_dataset()
+    return meta
 
 
 @router.get("/timeseries", response_model=TimeSeriesResponse)
@@ -49,9 +63,9 @@ def get_timeseries(
 ):
     """
     Returns the time-series of half-hourly wind generation actuals and Day-Ahead forecasts.
-    Guaranteed lookahead-free: Day-Ahead forecast matches 11:00 UTC D-1 Gate Closure.
+    Guaranteed lookahead-free: Day-Ahead forecast strictly precedes 11:00 UTC D-1 Auction Deadline.
     """
-    df, status = get_dataset(force_refresh=forceRefresh)
+    df, meta = get_dataset(force_refresh=forceRefresh)
 
     filtered_df = df.copy()
     if startDate:
@@ -63,30 +77,56 @@ def get_timeseries(
     if settlementPeriod:
         filtered_df = filtered_df[filtered_df["settlementPeriod"] == settlementPeriod]
 
-    data_points = [
-        ForecastDataPoint(
-            startTime=row["startTime"],
-            settlementDate=row["settlementDate"],
-            settlementPeriod=int(row["settlementPeriod"]),
-            isPeak=bool(row["isPeak"]),
-            actualMw=float(row["actualMw"]),
-            dayAheadForecastMw=float(row["dayAheadForecastMw"]),
-            intradayForecastMw=float(row["intradayForecastMw"]),
-            errorMw=float(row["errorMw"]),
-            absErrorMw=float(row["absErrorMw"]),
-            pctError=float(row["pctError"]),
-            confidenceLowerMw=float(row["confidenceLowerMw"]),
-            confidenceUpperMw=float(row["confidenceUpperMw"])
+    data_points = []
+    for _, row in filtered_df.iterrows():
+        da = float(row["dayAheadForecastMw"]) if pd.notna(row["dayAheadForecastMw"]) else None
+        ida = float(row["intradayForecastMw"]) if pd.notna(row["intradayForecastMw"]) else None
+        err = float(row["errorMw"]) if pd.notna(row["errorMw"]) else None
+        abs_err = float(row["absErrorMw"]) if pd.notna(row["absErrorMw"]) else None
+        pct_err = float(row["pctError"]) if pd.notna(row["pctError"]) else None
+        c_low = float(row["confidenceLowerMw"]) if pd.notna(row["confidenceLowerMw"]) else None
+        c_high = float(row["confidenceUpperMw"]) if pd.notna(row["confidenceUpperMw"]) else None
+
+        data_points.append(
+            ForecastDataPoint(
+                startTime=str(row["startTime"]),
+                settlementDate=str(row["settlementDate"]),
+                settlementPeriod=int(row["settlementPeriod"]),
+                isPeak=bool(row["isPeak"]),
+                actualMw=float(row["actualMw"]),
+                dayAheadForecastMw=da,
+                intradayForecastMw=ida,
+                errorMw=err,
+                absErrorMw=abs_err,
+                pctError=pct_err,
+                confidenceLowerMw=c_low,
+                confidenceUpperMw=c_high,
+                isMissingForecast=bool(row.get("isMissingForecast", da is None))
+            )
         )
-        for _, row in filtered_df.iterrows()
-    ]
+
+    valid_count = sum(1 for dp in data_points if dp.dayAheadForecastMw is not None)
+    coverage_pct = round((valid_count / len(data_points) * 100.0), 1) if data_points else 0.0
+
+    # Determine status string for backward compatibility
+    status_label = "Connected to Elexon BMRS" if meta.source == DataSourceType.ELEXON_LIVE else (
+        "Local Cache (Validated Engine)" if meta.source == DataSourceType.CACHE else
+        "Demonstration Dataset (Simulated Fallback)"
+    )
 
     return TimeSeriesResponse(
-        status=status,
-        cutoffRule="11:00 UTC D-1 Gate Closure",
+        status=status_label,
+        source=meta.source,
+        isSynthetic=meta.isSynthetic,
+        warning=meta.warning,
+        lastUpdatedAt=meta.lastUpdatedAt,
+        cutoffRule=meta.cutoffRule,
         startDate=str(filtered_df["settlementDate"].min()) if not filtered_df.empty else "2026-01-01",
         endDate=str(filtered_df["settlementDate"].max()) if not filtered_df.empty else "2026-01-31",
         totalRecords=len(data_points),
+        validRecords=valid_count,
+        coveragePct=coverage_pct,
+        empiricalCoverageP10P90Pct=meta.empiricalCoverageP10P90Pct,
         data=data_points
     )
 
@@ -164,11 +204,14 @@ def refresh_data():
     """
     Forces cache invalidation and re-ingestion from Elexon BMRS.
     """
-    df, status = elexon_service.get_aligned_data(force_refresh=True)
+    df, meta = elexon_service.get_aligned_data(force_refresh=True)
     return {
         "message": "Dataset refreshed successfully.",
-        "status": status,
-        "records": len(df)
+        "source": meta.source,
+        "isSynthetic": meta.isSynthetic,
+        "records": len(df),
+        "validRecords": meta.validRecords,
+        "coveragePct": meta.coveragePct
     }
 
 
@@ -187,4 +230,3 @@ def export_dataset_csv():
             "Content-Disposition": "attachment; filename=gridbricks_january_2026_wind_reconciliation.csv"
         }
     )
-

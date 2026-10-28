@@ -2,19 +2,22 @@
  * Type definitions for Gridbricks REint AI UK Wind Decision Intelligence
  */
 
+export type DataSourceType = 'ELEXON_LIVE' | 'CACHE' | 'SYNTHETIC_DEMO' | 'UNAVAILABLE';
+
 export interface ForecastDataPoint {
   startTime: string;
   settlementDate: string;
   settlementPeriod: number;
   isPeak: boolean;
   actualMw: number;
-  dayAheadForecastMw: number;
-  intradayForecastMw: number;
-  errorMw: number;
-  absErrorMw: number;
-  pctError: number;
-  confidenceLowerMw: number;
-  confidenceUpperMw: number;
+  dayAheadForecastMw?: number | null;
+  intradayForecastMw?: number | null;
+  errorMw?: number | null;
+  absErrorMw?: number | null;
+  pctError?: number | null;
+  confidenceLowerMw?: number | null;
+  confidenceUpperMw?: number | null;
+  isMissingForecast?: boolean;
 }
 
 export interface KPIMetrics {
@@ -32,6 +35,8 @@ export interface KPIMetrics {
   totalActualEnergyGWh: number;
   totalDayAheadEnergyGWh: number;
   sampleCount: number;
+  validSampleCount?: number;
+  coveragePct?: number;
 }
 
 export interface HistogramBin {
@@ -79,12 +84,33 @@ export interface SettlementPeriodProfile {
   meanBiasMw: number;
 }
 
-export interface TimeSeriesResponse {
-  status: string;
+export interface DatasetMetadata {
+  source: DataSourceType;
+  isSynthetic: boolean;
+  warning?: string | null;
+  lastUpdatedAt?: string | null;
   cutoffRule: string;
   startDate: string;
   endDate: string;
   totalRecords: number;
+  validRecords: number;
+  coveragePct: number;
+  empiricalCoverageP10P90Pct?: number | null;
+}
+
+export interface TimeSeriesResponse {
+  status: string;
+  source?: DataSourceType;
+  isSynthetic?: boolean;
+  warning?: string | null;
+  lastUpdatedAt?: string | null;
+  cutoffRule: string;
+  startDate: string;
+  endDate: string;
+  totalRecords: number;
+  validRecords?: number;
+  coveragePct?: number;
+  empiricalCoverageP10P90Pct?: number | null;
   data: ForecastDataPoint[];
 }
 
@@ -103,6 +129,7 @@ export interface ThermalProcurementRequest {
   targetDate?: string;
   settlementPeriod?: number;
   riskConfidenceLevel?: number;
+  maxThermalCapacityMw?: number;
   ccgtMarginalCostGbp?: number;
   systemBuyPriceGbp?: number;
   systemSellPriceGbp?: number;
@@ -117,6 +144,8 @@ export interface ThermalProcurementResponse {
   baseResidualThermalMw: number;
   recommendedRiskBufferMw: number;
   recommendedTotalThermalMw: number;
+  isCapacityConstrained?: boolean;
+  unconstrainedTotalThermalMw?: number;
   unbufferedDeficitRiskPct: number;
   bufferedDeficitRiskPct: number;
   expectedImbalanceCostUnbuffered: number;
@@ -125,4 +154,3 @@ export interface ThermalProcurementResponse {
   hedgingRationale: string;
   sensitivityScenarios: CashoutSensitivityScenario[];
 }
-

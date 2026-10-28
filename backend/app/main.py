@@ -29,8 +29,8 @@ async def lifespan(app: FastAPI):
     """Pre-warm dataset cache on startup to ensure instant UI responsiveness."""
     logger.info("Initializing Gridbricks REint AI Decision Platform...")
     try:
-        df, status = elexon_service.get_aligned_data()
-        logger.info(f"Pre-warmed dataset with {len(df)} settlement periods. Status: {status}")
+        df, meta = elexon_service.get_aligned_data()
+        logger.info(f"Pre-warmed dataset with {len(df)} settlement periods. Source: {meta.source}")
     except Exception as e:
         logger.error(f"Error during data pre-warming: {e}")
     yield

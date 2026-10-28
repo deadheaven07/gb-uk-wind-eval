@@ -1,19 +1,19 @@
 import React, { useState, useEffect } from 'react';
-import {
-  Header
-} from './components/Header';
+import { Header } from './components/Header';
 import { MetricKpiCards } from './components/MetricKpiCards';
 import { MainChart } from './components/MainChart';
 import { ErrorDistributionTab } from './components/ErrorDistributionTab';
 import { DailyHeatmapTab } from './components/DailyHeatmapTab';
 import { PeriodBreakdownTab } from './components/PeriodBreakdownTab';
 import { ThermalCalculatorTab } from './components/ThermalCalculatorTab';
+import { DatasetDetailsModal } from './components/DatasetDetailsModal';
 import {
   ForecastDataPoint,
   KPIMetrics,
   ErrorDistribution,
   DailyErrorMetric,
-  SettlementPeriodProfile
+  SettlementPeriodProfile,
+  DatasetMetadata
 } from './types';
 import { api } from './api/client';
 import {
@@ -21,7 +21,8 @@ import {
   BarChart2,
   Calendar,
   Clock,
-  ShieldAlert
+  ShieldAlert,
+  AlertTriangle
 } from 'lucide-react';
 
 export const App: React.FC = () => {
@@ -31,12 +32,14 @@ export const App: React.FC = () => {
   const [distribution, setDistribution] = useState<ErrorDistribution | null>(null);
   const [dailyHeatmap, setDailyHeatmap] = useState<DailyErrorMetric[]>([]);
   const [profiles, setProfiles] = useState<SettlementPeriodProfile[]>([]);
+  const [metadata, setMetadata] = useState<DatasetMetadata | null>(null);
 
   const [status, setStatus] = useState<string>('Connected to Elexon BMRS');
   const [cutoffRule, setCutoffRule] = useState<string>('11:00 UTC D-1');
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+  const [isDetailsModalOpen, setIsDetailsModalOpen] = useState<boolean>(false);
 
   const loadAllData = async (forceRefresh = false) => {
     try {
@@ -44,8 +47,9 @@ export const App: React.FC = () => {
       else setIsLoading(true);
       setError(null);
 
-      const [tsRes, kpiRes, distRes, heatRes, profRes] = await Promise.all([
+      const [tsRes, metaRes, kpiRes, distRes, heatRes, profRes] = await Promise.all([
         api.getTimeSeries({ forceRefresh }),
+        api.getMetadata().catch(() => null),
         api.getKPIs(),
         api.getErrorDistribution(25),
         api.getDailyHeatmap(),
@@ -55,6 +59,19 @@ export const App: React.FC = () => {
       setTimeseriesData(tsRes.data);
       setStatus(tsRes.status);
       setCutoffRule(tsRes.cutoffRule);
+      setMetadata(metaRes || {
+        source: tsRes.source || 'CACHE',
+        isSynthetic: tsRes.isSynthetic || false,
+        warning: tsRes.warning,
+        cutoffRule: tsRes.cutoffRule,
+        startDate: tsRes.startDate,
+        endDate: tsRes.endDate,
+        totalRecords: tsRes.totalRecords,
+        validRecords: tsRes.validRecords || tsRes.totalRecords,
+        coveragePct: tsRes.coveragePct || 100.0,
+        empiricalCoverageP10P90Pct: tsRes.empiricalCoverageP10P90Pct,
+        lastUpdatedAt: tsRes.lastUpdatedAt
+      });
       setKpis(kpiRes);
       setDistribution(distRes);
       setDailyHeatmap(heatRes);
@@ -72,12 +89,15 @@ export const App: React.FC = () => {
     loadAllData();
   }, []);
 
+  const isSynthetic = metadata?.isSynthetic || metadata?.source === 'SYNTHETIC_DEMO';
+
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col font-sans">
       {/* Sticky App Header */}
       <Header
         status={status}
         cutoffRule={cutoffRule}
+        metadata={metadata}
         isRefreshing={isRefreshing}
         onRefresh={() => loadAllData(true)}
       />
@@ -93,9 +113,27 @@ export const App: React.FC = () => {
             </div>
             <button
               onClick={() => loadAllData(true)}
-              className="px-2.5 py-1 bg-white border border-rose-300 rounded font-semibold hover:bg-rose-100"
+              className="px-2.5 py-1 bg-white border border-rose-300 rounded font-semibold hover:bg-rose-100 transition-colors"
             >
               Retry Connection
+            </button>
+          </div>
+        )}
+
+        {/* Visible, Honest Synthetic Data Warning Banner */}
+        {isSynthetic && (
+          <div className="p-3.5 rounded-xl bg-amber-50/90 border border-amber-300/80 text-amber-950 text-xs flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 shadow-xs">
+            <div className="flex items-center gap-2.5">
+              <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0" />
+              <span>
+                <strong>Demonstration Mode (Simulated Data):</strong> Remote Elexon BMRS API was unreachable. Showing high-fidelity simulated January 2026 UK wind fleet observations for demo purposes. Real-world financial or trade decisions should not be based on simulated data.
+              </span>
+            </div>
+            <button
+              onClick={() => setIsDetailsModalOpen(true)}
+              className="px-2.5 py-1 rounded-md bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 font-semibold text-[11px] shrink-0 transition-colors cursor-pointer"
+            >
+              Dataset Provenance Details
             </button>
           </div>
         )}
@@ -116,7 +154,7 @@ export const App: React.FC = () => {
             <nav className="flex space-x-6 text-xs" aria-label="Analytical Views">
               <button
                 onClick={() => setActiveTab('calculator')}
-                className={`py-3 px-1 border-b-2 font-semibold flex items-center gap-2 transition-colors ${
+                className={`py-3 px-1 border-b-2 font-semibold flex items-center gap-2 transition-colors cursor-pointer ${
                   activeTab === 'calculator'
                     ? 'border-blue-600 text-blue-600 font-bold'
                     : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
@@ -131,31 +169,31 @@ export const App: React.FC = () => {
 
               <button
                 onClick={() => setActiveTab('distribution')}
-                className={`py-3 px-1 border-b-2 font-semibold flex items-center gap-2 transition-colors ${
+                className={`py-3 px-1 border-b-2 font-semibold flex items-center gap-2 transition-colors cursor-pointer ${
                   activeTab === 'distribution'
                     ? 'border-blue-600 text-blue-600 font-bold'
                     : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
                 }`}
               >
                 <BarChart2 className="h-4 w-4" />
-                <span>Error Distribution & Tail Risk (P10-P90)</span>
+                <span>Error Distribution &amp; Tail Risk (P10-P90)</span>
               </button>
 
               <button
                 onClick={() => setActiveTab('heatmap')}
-                className={`py-3 px-1 border-b-2 font-semibold flex items-center gap-2 transition-colors ${
+                className={`py-3 px-1 border-b-2 font-semibold flex items-center gap-2 transition-colors cursor-pointer ${
                   activeTab === 'heatmap'
                     ? 'border-blue-600 text-blue-600 font-bold'
                     : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
                 }`}
               >
                 <Calendar className="h-4 w-4" />
-                <span>Daily Error Heatmap & Volatility</span>
+                <span>Daily Error Heatmap &amp; Volatility</span>
               </button>
 
               <button
                 onClick={() => setActiveTab('profiles')}
-                className={`py-3 px-1 border-b-2 font-semibold flex items-center gap-2 transition-colors ${
+                className={`py-3 px-1 border-b-2 font-semibold flex items-center gap-2 transition-colors cursor-pointer ${
                   activeTab === 'profiles'
                     ? 'border-blue-600 text-blue-600 font-bold'
                     : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
@@ -195,15 +233,21 @@ export const App: React.FC = () => {
           <div className="flex items-center gap-4 text-slate-400">
             <span>Data: Elexon BMRS (FUELHH &amp; WINDFOR)</span>
             <span>&bull;</span>
-            <span>Gate Closure: 11:00 UTC D-1</span>
+            <span>Auction Cutoff: 11:00 UTC D-1</span>
             <span>&bull;</span>
             <span>BSC Half-Hour Settlement (SPs 1-48)</span>
           </div>
         </div>
       </footer>
+
+      {/* Dataset Details Modal */}
+      <DatasetDetailsModal
+        isOpen={isDetailsModalOpen}
+        onClose={() => setIsDetailsModalOpen(false)}
+        metadata={metadata}
+      />
     </div>
   );
 };
 
 export default App;
-

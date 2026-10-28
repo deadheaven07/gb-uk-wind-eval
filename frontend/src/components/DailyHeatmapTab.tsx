@@ -99,7 +99,7 @@ export const DailyHeatmapTab: React.FC<DailyHeatmapTabProps> = ({ dailyData, isL
           return (
             <div
               key={day.date}
-              className={`p-3 rounded-lg border transition-all hover:scale-[1.02] shadow-xs flex flex-col justify-between h-32 ${getMaeBgClass(
+              className={`p-3 rounded-lg border transition-all duration-150 hover:shadow-sm shadow-xs flex flex-col justify-between h-32 ${getMaeBgClass(
                 day.maeMw
               )}`}
             >

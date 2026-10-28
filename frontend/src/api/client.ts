@@ -8,7 +8,8 @@ import {
   DailyErrorMetric,
   SettlementPeriodProfile,
   ThermalProcurementRequest,
-  ThermalProcurementResponse
+  ThermalProcurementResponse,
+  DatasetMetadata
 } from '../types';
 
 const getApiBase = (): string => {
@@ -66,6 +67,13 @@ export const api = {
 
     const qs = query.toString();
     return fetchJson<TimeSeriesResponse>(`/timeseries${qs ? `?${qs}` : ''}`);
+  },
+
+  /**
+   * Fetches dataset provenance and coverage metadata.
+   */
+  getMetadata: async (): Promise<DatasetMetadata> => {
+    return fetchJson<DatasetMetadata>('/metadata');
   },
 
   /**

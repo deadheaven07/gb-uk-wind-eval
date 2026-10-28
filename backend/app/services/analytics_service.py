@@ -14,7 +14,8 @@ Mathematical & Physical Logic:
    elevated Day-Ahead wholesale power prices, and tighter system margins.
 
 2. Error Formulations:
-   - Error (MW) = Forecast - Actual (positive indicates over-forecast / long risk).
+   - Error (MW) = Forecast - Actual (positive indicates over-forecast / long risk;
+     negative indicates under-forecast / short risk).
    - MAE (Mean Absolute Error): First-order metric of operational forecast uncertainty.
    - RMSE (Root Mean Square Error): Second-order quadratic penalty. Severe wind drops
      inflict non-linear stress on transmission system operator (National Grid ESO) reserves,
@@ -27,10 +28,12 @@ Mathematical & Physical Logic:
    - Base Residual = Consumer Demand - Wind Forecast.
    - Without risk buffering, any downward wind surprise leaves the portfolio short,
      incurring punitive cashout penalties (SBP often exceeding £120-£300/MWh during winter peaks).
-   - The P90 risk buffer calculates the 90th percentile of empirical wind down-forecast errors,
-     providing a robust hedge that reduces unhedged shortfall frequency from ~50% to <10%.
+   - The empirical quantile risk buffer (P90) calculates the 90th percentile of empirical
+     wind shortfall errors, providing a robust hedge that reduces unhedged shortfall frequency
+     from ~50% to <10%.
+   - Settlement conversion: Each settlement period is 30 minutes (0.5 hours), so 1 MW = 0.5 MWh.
 
-Author: Staff Energy Software Engineer
+Author: Senior Energy Software Engineer
 """
 
 import logging
@@ -63,15 +66,40 @@ class AnalyticsService:
     @staticmethod
     def calculate_kpis(df: pd.DataFrame) -> KPIMetrics:
         """
-        Computes summary KPIs across the aligned DataFrame.
+        Computes summary KPIs across the aligned DataFrame, correctly filtering
+        for non-missing forecasts to prevent lookahead or zero-imputation distortions.
         """
-        n = len(df)
-        if n == 0:
+        n_total = len(df)
+        if n_total == 0:
             raise ValueError("Cannot calculate KPIs on empty dataset.")
 
-        actual = df["actualMw"].to_numpy()
-        da_fct = df["dayAheadForecastMw"].to_numpy()
-        id_fct = df["intradayForecastMw"].to_numpy()
+        valid_mask = df["dayAheadForecastMw"].notna()
+        n_valid = int(valid_mask.sum())
+
+        if n_valid == 0:
+            logger.warning("No valid Day-Ahead forecast observations found for KPI calculation.")
+            return KPIMetrics(
+                maeMw=0.0,
+                maePct=0.0,
+                rmseMw=0.0,
+                meanBiasMw=0.0,
+                peakMaeMw=0.0,
+                offPeakMaeMw=0.0,
+                peakOffPeakDeltaMw=0.0,
+                intradayMaeMw=0.0,
+                intradayAccuracyImprovementPct=0.0,
+                maxUnderforecastMw=0.0,
+                maxOverforecastMw=0.0,
+                totalActualEnergyGWh=round(float(np.sum(df["actualMw"] * 0.5) / 1000.0), 2),
+                totalDayAheadEnergyGWh=0.0,
+                sampleCount=n_total,
+                validSampleCount=0,
+                coveragePct=0.0
+            )
+
+        valid_df = df[valid_mask]
+        actual = valid_df["actualMw"].to_numpy()
+        da_fct = valid_df["dayAheadForecastMw"].to_numpy()
         errors = da_fct - actual
         abs_errors = np.abs(errors)
 
@@ -83,7 +111,7 @@ class AnalyticsService:
         mean_bias_mw = float(np.mean(errors))
 
         # Peak vs Off-Peak separation
-        peak_mask = df["isPeak"].to_numpy(dtype=bool)
+        peak_mask = valid_df["isPeak"].to_numpy(dtype=bool)
         if np.any(peak_mask):
             peak_mae_mw = float(np.mean(abs_errors[peak_mask]))
         else:
@@ -97,25 +125,33 @@ class AnalyticsService:
 
         peak_delta_mw = peak_mae_mw - off_peak_mae_mw
 
-        # Intraday improvements
-        id_errors = np.abs(id_fct - actual)
-        id_mae_mw = float(np.mean(id_errors))
-        id_improvement_pct = float(
-            ((mae_mw - id_mae_mw) / mae_mw * 100.0) if mae_mw > 0 else 0.0
-        )
+        # Intraday improvements (evaluated on rows with both forecasts present)
+        id_valid_mask = valid_df["intradayForecastMw"].notna()
+        if np.any(id_valid_mask):
+            id_actual = actual[id_valid_mask]
+            id_fct = valid_df.loc[id_valid_mask, "intradayForecastMw"].to_numpy()
+            id_errors = np.abs(id_fct - id_actual)
+            id_mae_mw = float(np.mean(id_errors))
+            base_mae_for_id = float(np.mean(abs_errors[id_valid_mask]))
+            id_improvement_pct = float(
+                ((base_mae_for_id - id_mae_mw) / base_mae_for_id * 100.0) if base_mae_for_id > 0 else 0.0
+            )
+        else:
+            id_mae_mw = mae_mw
+            id_improvement_pct = 0.0
 
         # Extreme values
-        # Under-forecast: where actual > forecast, i.e., error < 0
-        under_errors = actual - da_fct
+        under_errors = actual - da_fct  # actual > forecast (wind deficit)
         max_underforecast = float(np.max(under_errors)) if len(under_errors) > 0 else 0.0
 
-        # Over-forecast: where forecast > actual, i.e., error > 0
-        over_errors = da_fct - actual
+        over_errors = da_fct - actual  # forecast > actual (wind surplus)
         max_overforecast = float(np.max(over_errors)) if len(over_errors) > 0 else 0.0
 
-        # Energy delivered (half-hours converted to GWh)
-        total_actual_gwh = float(np.sum(actual * 0.5) / 1000.0)
+        # Energy delivered (half-hours converted to GWh: sum(MW * 0.5h) / 1000)
+        total_actual_gwh = float(np.sum(df["actualMw"] * 0.5) / 1000.0)
         total_da_gwh = float(np.sum(da_fct * 0.5) / 1000.0)
+
+        coverage_pct = round((n_valid / n_total * 100.0), 1)
 
         return KPIMetrics(
             maeMw=round(mae_mw, 2),
@@ -131,18 +167,23 @@ class AnalyticsService:
             maxOverforecastMw=round(max_overforecast, 2),
             totalActualEnergyGWh=round(total_actual_gwh, 2),
             totalDayAheadEnergyGWh=round(total_da_gwh, 2),
-            sampleCount=n
+            sampleCount=n_total,
+            validSampleCount=n_valid,
+            coveragePct=coverage_pct
         )
 
     @staticmethod
     def calculate_error_distribution(df: pd.DataFrame, num_bins: int = 25) -> ErrorDistribution:
         """
         Calculates non-parametric quantiles and frequency histogram of forecast errors.
+        Discards missing intervals to prevent biased zero-error spike artifacts.
         """
-        errors = (df["dayAheadForecastMw"] - df["actualMw"]).to_numpy()
+        valid_df = df[df["dayAheadForecastMw"].notna()]
+        if valid_df.empty:
+            raise ValueError("No valid forecast observations available for distribution calculation.")
+
+        errors = (valid_df["dayAheadForecastMw"] - valid_df["actualMw"]).to_numpy()
         n = len(errors)
-        if n == 0:
-            raise ValueError("Dataset empty for error distribution.")
 
         p05 = float(np.percentile(errors, 5))
         p10 = float(np.percentile(errors, 10))
@@ -153,7 +194,8 @@ class AnalyticsService:
         p95 = float(np.percentile(errors, 95))
         p99 = float(np.percentile(errors, 99))
 
-        std_dev = float(np.std(errors, ddof=1))
+        std_dev = float(np.std(errors, ddof=1)) if n > 1 else 0.0
+
         # Skewness and Kurtosis
         mean_err = np.mean(errors)
         m2 = np.mean((errors - mean_err) ** 2)
@@ -172,7 +214,7 @@ class AnalyticsService:
             b_end = float(bin_edges[i + 1])
             b_center = (b_start + b_end) / 2.0
             cnt = int(counts[i])
-            pct = round((cnt / total_counts * 100.0), 2)
+            pct = round((cnt / total_counts * 100.0), 2) if total_counts > 0 else 0.0
             hist_bins.append(
                 HistogramBin(
                     binStart=round(b_start, 1),
@@ -201,22 +243,29 @@ class AnalyticsService:
     @staticmethod
     def calculate_daily_breakdown(df: pd.DataFrame) -> List[DailyErrorMetric]:
         """
-        Aggregates error metrics by calendar date for heatmap visualization.
+        Aggregates error metrics by calendar date for calendar heatmap visualization.
         """
         results = []
         for sdate, group in df.groupby("settlementDate"):
-            errors = group["dayAheadForecastMw"] - group["actualMw"]
-            abs_err = errors.abs()
+            valid_group = group[group["dayAheadForecastMw"].notna()]
+            if not valid_group.empty:
+                errors = valid_group["dayAheadForecastMw"] - valid_group["actualMw"]
+                abs_err = errors.abs()
+                mae = float(abs_err.mean())
+                rmse = float(np.sqrt((errors ** 2).mean()))
+                bias = float(errors.mean())
+                da_mwh = float(valid_group["dayAheadForecastMw"].sum() * 0.5)
+            else:
+                mae = 0.0
+                rmse = 0.0
+                bias = 0.0
+                da_mwh = 0.0
 
-            mae = float(abs_err.mean())
-            rmse = float(np.sqrt((errors ** 2).mean()))
-            bias = float(errors.mean())
             act_mwh = float(group["actualMw"].sum() * 0.5)
-            da_mwh = float(group["dayAheadForecastMw"].sum() * 0.5)
 
             # Volatility calculation based on half-hour ramp delta
             ramp_vol = float(group["actualMw"].diff().abs().mean())
-            volatility_index = min(100.0, (ramp_vol / 120.0) * 100.0)
+            volatility_index = min(100.0, (ramp_vol / 120.0) * 100.0) if not np.isnan(ramp_vol) else 50.0
 
             # Event classification based on wind volume and forecast behavior
             mean_wind = float(group["actualMw"].mean())
@@ -242,39 +291,49 @@ class AnalyticsService:
                 )
             )
 
-        # Sort chronologically
         results.sort(key=lambda x: x.date)
         return results
 
     @staticmethod
     def calculate_settlement_period_profiles(df: pd.DataFrame) -> List[SettlementPeriodProfile]:
         """
-        Computes 48-period diurnal profiles averaged across January 2026.
+        Diurnal analysis across all 48 half-hour settlement periods.
         """
         profiles = []
         for sp, group in df.groupby("settlementPeriod"):
             sp_int = int(sp)
-            errors = group["dayAheadForecastMw"] - group["actualMw"]
+            valid_group = group[group["dayAheadForecastMw"].notna()]
 
-            # Calculate time range string
             total_start_mins = (sp_int - 1) * 30
-            start_h = total_start_mins // 60
-            start_m = total_start_mins % 60
-            end_mins = total_start_mins + 30
-            end_h = end_mins // 60
-            end_m = end_mins % 60
-            time_str = f"{start_h:02d}:{start_m:02d} - {end_h:02d}:{end_m:02d}"
+            sh = total_start_mins // 60
+            sm = total_start_mins % 60
+            eh = (total_start_mins + 30) // 60
+            em = (total_start_mins + 30) % 60
+            time_str = f"{sh:02d}:{sm:02d} - {eh:02d}:{em:02d} UTC"
+
+            mean_act = float(group["actualMw"].mean())
+            if not valid_group.empty:
+                errors = valid_group["dayAheadForecastMw"] - valid_group["actualMw"]
+                mean_fct = float(valid_group["dayAheadForecastMw"].mean())
+                mae = float(errors.abs().mean())
+                rmse = float(np.sqrt((errors ** 2).mean()))
+                bias = float(errors.mean())
+            else:
+                mean_fct = 0.0
+                mae = 0.0
+                rmse = 0.0
+                bias = 0.0
 
             profiles.append(
                 SettlementPeriodProfile(
                     settlementPeriod=sp_int,
                     timeUtc=time_str,
                     isPeak=15 <= sp_int <= 38,
-                    meanActualMw=round(float(group["actualMw"].mean()), 2),
-                    meanForecastMw=round(float(group["dayAheadForecastMw"].mean()), 2),
-                    maeMw=round(float(errors.abs().mean()), 2),
-                    rmseMw=round(float(np.sqrt((errors ** 2).mean())), 2),
-                    meanBiasMw=round(float(errors.mean()), 2)
+                    meanActualMw=round(mean_act, 2),
+                    meanForecastMw=round(mean_fct, 2),
+                    maeMw=round(mae, 2),
+                    rmseMw=round(rmse, 2),
+                    meanBiasMw=round(bias, 2)
                 )
             )
 
@@ -288,19 +347,22 @@ class AnalyticsService:
         """
         Trader Decision Support Engine:
         Calculates optimal Day-Ahead dispatchable thermal power procurement (CCGT / biomass)
-        and risk safety buffers to safeguard against asymmetric imbalance penalties.
-        Supports both Market Aggregate mode and Specific Historical Settlement Period replay.
+        and risk safety buffers to safeguard against asymmetric imbalance cashout penalties.
+        Supports Market Aggregate mode, Historical Replay, and thermal fleet capacity constraints.
         """
-        demand = request.expectedDemandMw
+        demand = max(0.0, float(request.expectedDemandMw))
         actual_outturn = None
         period_label = None
 
         # Determine reference wind forecast based on request
         if request.targetDate and request.settlementPeriod:
-            matched = df[(df["settlementDate"] == request.targetDate) & (df["settlementPeriod"] == request.settlementPeriod)]
+            matched = df[
+                (df["settlementDate"] == request.targetDate) &
+                (df["settlementPeriod"] == request.settlementPeriod)
+            ]
             if not matched.empty:
                 row = matched.iloc[0]
-                wind_fct = float(row["dayAheadForecastMw"])
+                wind_fct = float(row["dayAheadForecastMw"]) if pd.notna(row["dayAheadForecastMw"]) else float(df["dayAheadForecastMw"].dropna().mean())
                 actual_outturn = float(row["actualMw"])
                 total_start_mins = (int(request.settlementPeriod) - 1) * 30
                 sh = total_start_mins // 60
@@ -309,49 +371,61 @@ class AnalyticsService:
                 em = (total_start_mins + 30) % 60
                 period_label = f"{request.targetDate} SP {request.settlementPeriod} ({sh:02d}:{sm:02d} - {eh:02d}:{em:02d} UTC)"
             else:
-                wind_fct = request.windForecastMw if request.windForecastMw is not None else float(df["dayAheadForecastMw"].mean())
+                wind_fct = request.windForecastMw if request.windForecastMw is not None else float(df["dayAheadForecastMw"].dropna().mean())
         elif request.windForecastMw is not None:
-            wind_fct = request.windForecastMw
+            wind_fct = float(request.windForecastMw)
         elif request.settlementPeriod is not None:
-            sp_data = df[df["settlementPeriod"] == request.settlementPeriod]
-            wind_fct = float(sp_data["dayAheadForecastMw"].mean()) if not sp_data.empty else float(df["dayAheadForecastMw"].mean())
+            sp_data = df[(df["settlementPeriod"] == request.settlementPeriod) & df["dayAheadForecastMw"].notna()]
+            wind_fct = float(sp_data["dayAheadForecastMw"].mean()) if not sp_data.empty else float(df["dayAheadForecastMw"].dropna().mean())
             period_label = f"Diurnal Average for Settlement Period {request.settlementPeriod}"
         else:
-            wind_fct = float(df["dayAheadForecastMw"].mean())
+            wind_fct = float(df["dayAheadForecastMw"].dropna().mean())
             period_label = "January 2026 Monthly Average"
 
-        # Base residual thermal requirement (deterministic)
+        # Deterministic Base Residual Thermal: Demand - Wind Forecast
         base_residual = max(0.0, demand - wind_fct)
 
         # Empirical wind shortfall errors:
         # A shortfall occurs when actual < forecast (i.e. dayAheadForecastMw - actualMw > 0)
-        errors = df["dayAheadForecastMw"] - df["actualMw"]
-        shortfalls = np.maximum(0.0, errors.to_numpy())
+        valid_df = df[df["dayAheadForecastMw"].notna()]
+        if not valid_df.empty:
+            errors = (valid_df["dayAheadForecastMw"] - valid_df["actualMw"]).to_numpy()
+        else:
+            errors = np.array([0.0])
+
+        shortfalls = np.maximum(0.0, errors)
 
         # Quantile buffer based on requested confidence level (default P90)
         target_quantile = request.riskConfidenceLevel * 100.0
         risk_buffer_mw = float(np.percentile(shortfalls, target_quantile))
 
-        # Recommended total thermal commitment
-        recommended_total_thermal = round(base_residual + risk_buffer_mw, 2)
+        # Unconstrained recommended total commitment
+        unconstrained_thermal = round(base_residual + risk_buffer_mw, 2)
+
+        # Capacity Capping
+        is_constrained = False
+        if request.maxThermalCapacityMw is not None and request.maxThermalCapacityMw > 0:
+            if unconstrained_thermal > request.maxThermalCapacityMw:
+                recommended_total_thermal = float(request.maxThermalCapacityMw)
+                is_constrained = True
+            else:
+                recommended_total_thermal = unconstrained_thermal
+        else:
+            recommended_total_thermal = unconstrained_thermal
 
         # Deficit probabilities
-        # Without buffer: probability that actual wind < forecast
-        unbuffered_deficit_prob = float(np.mean(errors > 0) * 100.0)
-        # With buffer: probability that wind shortfall exceeds the buffer
-        buffered_deficit_prob = float(np.mean(shortfalls > risk_buffer_mw) * 100.0)
+        unbuffered_deficit_prob = float(np.mean(errors > 0) * 100.0) if len(errors) > 0 else 50.0
+        buffered_deficit_prob = float(np.mean(shortfalls > risk_buffer_mw) * 100.0) if len(shortfalls) > 0 else 10.0
 
-        # Financial valuation
-        sbp = request.systemBuyPriceGbp or settings.DEFAULT_SYSTEM_BUY_PRICE_GBP
-        ssp = request.systemSellPriceGbp or settings.DEFAULT_SYSTEM_SELL_PRICE_GBP
-        ccgt_cost = request.ccgtMarginalCostGbp or settings.DEFAULT_CCGT_MARGINAL_COST_GBP
-        da_price = request.dayAheadPowerPriceGbp or settings.DEFAULT_DAY_AHEAD_POWER_PRICE_GBP
+        # Financial benchmarks (£/MWh)
+        sbp = float(request.systemBuyPriceGbp if request.systemBuyPriceGbp is not None else settings.DEFAULT_SYSTEM_BUY_PRICE_GBP)
+        ccgt_cost = float(request.ccgtMarginalCostGbp if request.ccgtMarginalCostGbp is not None else settings.DEFAULT_CCGT_MARGINAL_COST_GBP)
+        da_price = float(request.dayAheadPowerPriceGbp if request.dayAheadPowerPriceGbp is not None else settings.DEFAULT_DAY_AHEAD_POWER_PRICE_GBP)
 
-        # Unbuffered Expected Imbalance Cost:
+        # Energy conversion: 30-minute settlement period = 0.5 hours (1 MW = 0.5 MWh)
         expected_deficit_mw = float(np.mean(shortfalls))
         unbuffered_cost = expected_deficit_mw * 0.5 * max(0.0, (sbp - da_price))
 
-        # Buffered Expected Imbalance Cost:
         residual_shortfalls = np.maximum(0.0, shortfalls - risk_buffer_mw)
         expected_residual_deficit_mw = float(np.mean(residual_shortfalls))
         residual_penalty = expected_residual_deficit_mw * 0.5 * max(0.0, (sbp - da_price))
@@ -385,13 +459,14 @@ class AnalyticsService:
             )
 
         # Operational Rationale for the Trading Desk
+        cap_note = f" (Capped by fleet limit of {request.maxThermalCapacityMw:,.0f} MW)" if is_constrained else ""
         rationale = (
-            f"Under gross consumer demand of {demand:,.0f} MW and a Day-Ahead wind forecast of {wind_fct:,.0f} MW, "
-            f"naive procurement leaves a residual requirement of {base_residual:,.0f} MW. However, empirical January 2026 "
-            f"outturns reveal a {unbuffered_deficit_prob:.1f}% probability of wind shortfall. Applying a P{int(target_quantile)} "
-            f"risk buffer of +{risk_buffer_mw:,.0f} MW compresses the portfolio shortfall exposure to {buffered_deficit_prob:.1f}%. "
-            f"This shields the utility from peak cashout penalties (£{sbp:.2f}/MWh SBP), yielding an estimated net risk-adjusted saving "
-            f"of £{net_value_add:,.2f} for this 30-minute settlement period."
+            f"Under consumer demand of {demand:,.0f} MW and a Day-Ahead wind forecast of {wind_fct:,.0f} MW, "
+            f"deterministic residual requirement is {base_residual:,.0f} MW. Empirical January 2026 outturns "
+            f"indicate a {unbuffered_deficit_prob:.1f}% probability of wind deficit. Applying an empirical P{int(target_quantile)} "
+            f"safety buffer (+{risk_buffer_mw:,.0f} MW) compresses shortfall risk to {buffered_deficit_prob:.1f}%, recommending "
+            f"a total commitment of {recommended_total_thermal:,.0f} MW{cap_note}. At £{sbp:.2f}/MWh SBP, this yields an estimated "
+            f"net risk-adjusted saving of £{net_value_add:,.2f} for this 30-minute settlement period (0.5 MWh conversion)."
         )
 
         return ThermalProcurementResponse(
@@ -402,6 +477,8 @@ class AnalyticsService:
             baseResidualThermalMw=round(base_residual, 2),
             recommendedRiskBufferMw=round(risk_buffer_mw, 2),
             recommendedTotalThermalMw=recommended_total_thermal,
+            isCapacityConstrained=is_constrained,
+            unconstrainedTotalThermalMw=unconstrained_thermal if is_constrained else None,
             unbufferedDeficitRiskPct=round(unbuffered_deficit_prob, 2),
             bufferedDeficitRiskPct=round(buffered_deficit_prob, 2),
             expectedImbalanceCostUnbuffered=round(unbuffered_cost, 2),
