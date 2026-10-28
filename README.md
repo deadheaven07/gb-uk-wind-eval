@@ -1,6 +1,6 @@
 # Gridbricks REint AI | UK Day-Ahead Wind Decision Intelligence Platform
 
-[![CI Pipeline](https://github.com/deadheaven07/Assignment_GridBricks/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/deadheaven07/Assignment_GridBricks/actions/workflows/ci.yml)
+[![CI Pipeline](https://github.com/deadheaven07/gb-uk-wind-eval/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/deadheaven07/gb-uk-wind-eval/actions/workflows/ci.yml)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.110+-009688.svg)](https://fastapi.tiangolo.com/)
 [![React 18](https://img.shields.io/badge/React-18-61dafb.svg)](https://reactjs.org/)
@@ -272,8 +272,8 @@ flowchart LR
 #### CI Workflow Matrix:
 | Job | Runtime Environment | Tasks Executed | Status |
 | :--- | :--- | :--- | :--- |
-| **Backend Lint & Pytest Suite** | `ubuntu-latest` / Python 3.11 | Pip cache restoration (`cache-dependency-path: backend/requirements.txt`), dependency installation, Ruff code linting (`ruff check backend/`), isolated environment setup (`CACHE_DIR: /tmp/cache`), and execution of the complete 27-test suite (`pytest`). | [![Passing](https://img.shields.io/badge/status-passing-22c55e.svg)](https://github.com/deadheaven07/Assignment_GridBricks/actions/workflows/ci.yml) |
-| **Frontend Typecheck & Build** | `ubuntu-latest` / Node 20 | NPM package cache restoration (`frontend/package.json`), clean dependency install (`npm ci`), strict TypeScript compiler typecheck (`tsc --noEmit`), and production Vite bundling. | [![Passing](https://img.shields.io/badge/status-passing-22c55e.svg)](https://github.com/deadheaven07/Assignment_GridBricks/actions/workflows/ci.yml) |
+| **Backend Lint & Pytest Suite** | `ubuntu-latest` / Python 3.11 | Pip cache restoration (`cache-dependency-path: backend/requirements.txt`), dependency installation, Ruff code linting (`ruff check backend/`), isolated environment setup (`CACHE_DIR: /tmp/cache`), and execution of the complete 27-test suite (`pytest`). | [![Passing](https://img.shields.io/badge/status-passing-22c55e.svg)](https://github.com/deadheaven07/gb-uk-wind-eval/actions/workflows/ci.yml) |
+| **Frontend Typecheck & Build** | `ubuntu-latest` / Node 20 | NPM package cache restoration (`frontend/package.json`), clean dependency install (`npm ci`), strict TypeScript compiler typecheck (`tsc --noEmit`), and production Vite bundling. | [![Passing](https://img.shields.io/badge/status-passing-22c55e.svg)](https://github.com/deadheaven07/gb-uk-wind-eval/actions/workflows/ci.yml) |
 
 ---
 
