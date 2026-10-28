@@ -120,8 +120,6 @@ Assignmnt/
 │   ├── package.json
 │   ├── tailwind.config.js         # Custom financial light-theme palette
 │   └── vite.config.ts             # Vite bundler & backend proxy
-├── docs/
-│   └── VIDEO_DEMO_SCRIPT.md       # Complete 10-minute video presentation script
 ├── .github/workflows/
 │   └── ci.yml                     # Automated GitHub Actions test & build pipeline
 ├── docker-compose.yml             # Single-command local container orchestration
