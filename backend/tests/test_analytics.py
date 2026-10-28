@@ -217,3 +217,11 @@ def test_api_endpoints_integration():
     data_proc = resp_proc.json()
     assert data_proc["demandMw"] == 32000.0
     assert data_proc["recommendedTotalThermalMw"] > 0.0
+    assert len(data_proc["sensitivityScenarios"]) == 4
+
+    # CSV Export endpoint
+    resp_csv = client.get("/api/v1/export/csv")
+    assert resp_csv.status_code == 200
+    assert resp_csv.headers["content-type"].startswith("text/csv")
+    assert "dayAheadForecastMw" in resp_csv.text
+

@@ -11,7 +11,21 @@ import {
   ThermalProcurementResponse
 } from '../types';
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL || '/api/v1';
+const getApiBase = (): string => {
+  if (import.meta.env.VITE_API_BASE_URL) {
+    return import.meta.env.VITE_API_BASE_URL;
+  }
+  if (typeof window !== 'undefined') {
+    const host = window.location.hostname;
+    // Direct browser-to-FastAPI connection for local development avoiding sandbox proxy latency/EPERM
+    if (host === 'localhost' || host === '127.0.0.1') {
+      return `http://${host}:8000/api/v1`;
+    }
+  }
+  return '/api/v1';
+};
+
+const API_BASE = getApiBase();
 
 async function fetchJson<T>(endpoint: string, options?: RequestInit): Promise<T> {
   const url = `${API_BASE}${endpoint}`;
@@ -108,6 +122,13 @@ export const api = {
     return fetchJson<{ message: string; status: string; records: number }>('/refresh-data', {
       method: 'POST',
     });
+  },
+
+  /**
+   * Returns the direct URL to download the reconciled CSV dataset.
+   */
+  getExportCsvUrl: (): string => {
+    return `${API_BASE}/export/csv`;
   },
 };
 

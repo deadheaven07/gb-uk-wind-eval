@@ -357,3 +357,4 @@ class ElexonService:
 
 # Global singleton instance
 elexon_service = ElexonService()
+

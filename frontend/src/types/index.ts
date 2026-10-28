@@ -88,9 +88,19 @@ export interface TimeSeriesResponse {
   data: ForecastDataPoint[];
 }
 
+export interface CashoutSensitivityScenario {
+  systemBuyPriceGbp: number;
+  scenarioLabel: string;
+  unbufferedCostGbp: number;
+  bufferedCostGbp: number;
+  netSavingsGbp: number;
+  varReductionPct: number;
+}
+
 export interface ThermalProcurementRequest {
   expectedDemandMw: number;
   windForecastMw?: number;
+  targetDate?: string;
   settlementPeriod?: number;
   riskConfidenceLevel?: number;
   ccgtMarginalCostGbp?: number;
@@ -102,6 +112,8 @@ export interface ThermalProcurementRequest {
 export interface ThermalProcurementResponse {
   demandMw: number;
   windForecastMw: number;
+  actualOutturnMw?: number;
+  selectedPeriodLabel?: string;
   baseResidualThermalMw: number;
   recommendedRiskBufferMw: number;
   recommendedTotalThermalMw: number;
@@ -111,5 +123,6 @@ export interface ThermalProcurementResponse {
   expectedImbalanceCostBuffered: number;
   netValueAddGbp: number;
   hedgingRationale: string;
+  sensitivityScenarios: CashoutSensitivityScenario[];
 }
 

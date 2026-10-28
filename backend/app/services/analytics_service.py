@@ -46,7 +46,8 @@ from app.schemas.forecast import (
     DailyErrorMetric,
     SettlementPeriodProfile,
     ThermalProcurementRequest,
-    ThermalProcurementResponse
+    ThermalProcurementResponse,
+    CashoutSensitivityScenario
 )
 
 logger = logging.getLogger("gridbricks.analytics")
@@ -288,17 +289,36 @@ class AnalyticsService:
         Trader Decision Support Engine:
         Calculates optimal Day-Ahead dispatchable thermal power procurement (CCGT / biomass)
         and risk safety buffers to safeguard against asymmetric imbalance penalties.
+        Supports both Market Aggregate mode and Specific Historical Settlement Period replay.
         """
         demand = request.expectedDemandMw
+        actual_outturn = None
+        period_label = None
 
-        # Determine reference wind forecast
-        if request.windForecastMw is not None:
+        # Determine reference wind forecast based on request
+        if request.targetDate and request.settlementPeriod:
+            matched = df[(df["settlementDate"] == request.targetDate) & (df["settlementPeriod"] == request.settlementPeriod)]
+            if not matched.empty:
+                row = matched.iloc[0]
+                wind_fct = float(row["dayAheadForecastMw"])
+                actual_outturn = float(row["actualMw"])
+                total_start_mins = (int(request.settlementPeriod) - 1) * 30
+                sh = total_start_mins // 60
+                sm = total_start_mins % 60
+                eh = (total_start_mins + 30) // 60
+                em = (total_start_mins + 30) % 60
+                period_label = f"{request.targetDate} SP {request.settlementPeriod} ({sh:02d}:{sm:02d} - {eh:02d}:{em:02d} UTC)"
+            else:
+                wind_fct = request.windForecastMw if request.windForecastMw is not None else float(df["dayAheadForecastMw"].mean())
+        elif request.windForecastMw is not None:
             wind_fct = request.windForecastMw
         elif request.settlementPeriod is not None:
             sp_data = df[df["settlementPeriod"] == request.settlementPeriod]
             wind_fct = float(sp_data["dayAheadForecastMw"].mean()) if not sp_data.empty else float(df["dayAheadForecastMw"].mean())
+            period_label = f"Diurnal Average for Settlement Period {request.settlementPeriod}"
         else:
             wind_fct = float(df["dayAheadForecastMw"].mean())
+            period_label = "January 2026 Monthly Average"
 
         # Base residual thermal requirement (deterministic)
         base_residual = max(0.0, demand - wind_fct)
@@ -328,12 +348,10 @@ class AnalyticsService:
         da_price = request.dayAheadPowerPriceGbp or settings.DEFAULT_DAY_AHEAD_POWER_PRICE_GBP
 
         # Unbuffered Expected Imbalance Cost:
-        # Expected deficit (MW) * 0.5h * (SBP - DA_price)
         expected_deficit_mw = float(np.mean(shortfalls))
         unbuffered_cost = expected_deficit_mw * 0.5 * max(0.0, (sbp - da_price))
 
         # Buffered Expected Imbalance Cost:
-        # Under buffer, deficit is capped to shortfalls > buffer, while excess buffer incurs CCGT marginal carry
         residual_shortfalls = np.maximum(0.0, shortfalls - risk_buffer_mw)
         expected_residual_deficit_mw = float(np.mean(residual_shortfalls))
         residual_penalty = expected_residual_deficit_mw * 0.5 * max(0.0, (sbp - da_price))
@@ -341,6 +359,30 @@ class AnalyticsService:
         buffered_cost = residual_penalty + buffer_carry_cost
 
         net_value_add = max(0.0, unbuffered_cost - buffered_cost)
+
+        # Stress-Testing Sensitivity Matrix (£100 to £350/MWh)
+        scenarios = [
+            (100.0, "Mild System Margin"),
+            (150.0, "Moderate Peak Margin"),
+            (250.0, "Tight System / Peaker Event"),
+            (350.0, "Emergency Grid Scarcity / Alert")
+        ]
+        sensitivity_list = []
+        for stress_sbp, label in scenarios:
+            unbuf_stress = expected_deficit_mw * 0.5 * max(0.0, (stress_sbp - da_price))
+            buf_stress = (expected_residual_deficit_mw * 0.5 * max(0.0, (stress_sbp - da_price))) + buffer_carry_cost
+            savings = max(0.0, unbuf_stress - buf_stress)
+            var_reduction = ((unbuf_stress - buf_stress) / unbuf_stress * 100.0) if unbuf_stress > 0 else 0.0
+            sensitivity_list.append(
+                CashoutSensitivityScenario(
+                    systemBuyPriceGbp=stress_sbp,
+                    scenarioLabel=label,
+                    unbufferedCostGbp=round(unbuf_stress, 2),
+                    bufferedCostGbp=round(buf_stress, 2),
+                    netSavingsGbp=round(savings, 2),
+                    varReductionPct=round(var_reduction, 1)
+                )
+            )
 
         # Operational Rationale for the Trading Desk
         rationale = (
@@ -355,6 +397,8 @@ class AnalyticsService:
         return ThermalProcurementResponse(
             demandMw=round(demand, 2),
             windForecastMw=round(wind_fct, 2),
+            actualOutturnMw=round(actual_outturn, 2) if actual_outturn is not None else None,
+            selectedPeriodLabel=period_label,
             baseResidualThermalMw=round(base_residual, 2),
             recommendedRiskBufferMw=round(risk_buffer_mw, 2),
             recommendedTotalThermalMw=recommended_total_thermal,
@@ -363,7 +407,8 @@ class AnalyticsService:
             expectedImbalanceCostUnbuffered=round(unbuffered_cost, 2),
             expectedImbalanceCostBuffered=round(buffered_cost, 2),
             netValueAddGbp=round(net_value_add, 2),
-            hedgingRationale=rationale
+            hedgingRationale=rationale,
+            sensitivityScenarios=sensitivity_list
         )
 
 

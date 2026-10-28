@@ -109,6 +109,18 @@ class TimeSeriesResponse(BaseModel):
     data: List[ForecastDataPoint]
 
 
+class CashoutSensitivityScenario(BaseModel):
+    """
+    Stress-testing scenario modeling financial cashout exposure across varying SBP price spikes.
+    """
+    systemBuyPriceGbp: float = Field(..., description="Hypothetical System Buy Price (£/MWh)")
+    scenarioLabel: str = Field(..., description="Descriptive market stress regime")
+    unbufferedCostGbp: float = Field(..., description="Expected cashout loss without risk buffer (£)")
+    bufferedCostGbp: float = Field(..., description="Expected cost with P90 risk buffer (£)")
+    netSavingsGbp: float = Field(..., description="Net financial savings (£)")
+    varReductionPct: float = Field(..., description="Percentage reduction in Value-at-Risk (%)")
+
+
 class ThermalProcurementRequest(BaseModel):
     """
     Trader input parameters for calculating optimal dispatchable thermal hedge
@@ -116,6 +128,7 @@ class ThermalProcurementRequest(BaseModel):
     """
     expectedDemandMw: float = Field(..., ge=5000.0, le=60000.0, description="Gross forecasted consumer electrical demand (MW)")
     windForecastMw: Optional[float] = Field(None, description="Day-Ahead Wind Forecast for the target period (MW). If omitted, uses period mean.")
+    targetDate: Optional[str] = Field(None, description="Optional specific calendar date (YYYY-MM-DD) for historical replay")
     settlementPeriod: Optional[int] = Field(None, ge=1, le=50, description="Specific target settlement period (1-48)")
     riskConfidenceLevel: float = Field(0.90, ge=0.50, le=0.99, description="Target risk coverage quantile (e.g., 0.90 for P90 buffer)")
     ccgtMarginalCostGbp: Optional[float] = Field(78.50, ge=0.0, description="Combined Cycle Gas Turbine fuel + carbon marginal cost (£/MWh)")
@@ -131,6 +144,8 @@ class ThermalProcurementResponse(BaseModel):
     """
     demandMw: float
     windForecastMw: float
+    actualOutturnMw: Optional[float] = Field(None, description="Actual wind outturn recorded if a specific historical period was selected (MW)")
+    selectedPeriodLabel: Optional[str] = Field(None, description="Descriptive label of the evaluated half-hour block")
     baseResidualThermalMw: float = Field(..., description="Deterministic residual requirement: Demand - Wind Forecast (MW)")
     recommendedRiskBufferMw: float = Field(..., description="Quantified risk buffer derived from empirical wind forecast tail error (MW)")
     recommendedTotalThermalMw: float = Field(..., description="Recommended Day-Ahead thermal procurement commitment (MW)")
@@ -140,3 +155,5 @@ class ThermalProcurementResponse(BaseModel):
     expectedImbalanceCostBuffered: float = Field(..., description="Expected settlement period cashout cost with Gridbricks risk buffer (£)")
     netValueAddGbp: float = Field(..., description="Estimated net monetary savings per half-hour settlement period (£)")
     hedgingRationale: str = Field(..., description="Executive operational rationale and trading instructions for the desk")
+    sensitivityScenarios: List[CashoutSensitivityScenario] = Field(default_factory=list, description="Stress-testing cashout sensitivity matrix (£100-£350/MWh)")
+

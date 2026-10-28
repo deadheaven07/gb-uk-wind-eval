@@ -4,7 +4,9 @@ import {
   AlertTriangle,
   Activity,
   HelpCircle,
-  Clock
+  Clock,
+  Sparkles,
+  ArrowRight
 } from 'lucide-react';
 import { KPIMetrics } from '../types';
 
@@ -27,7 +29,8 @@ export const MetricKpiCards: React.FC<MetricKpiCardsProps> = ({ kpis, isLoading 
   const isOverforecast = kpis.meanBiasMw > 0;
 
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+    <div className="space-y-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
       {/* 1. MAE Card */}
       <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs hover:border-slate-300 transition-all relative group">
         <div className="flex items-center justify-between">
@@ -154,6 +157,43 @@ export const MetricKpiCards: React.FC<MetricKpiCardsProps> = ({ kpis, isLoading 
         </div>
       </div>
     </div>
+
+    {/* Forecast Horizon Error Decay & Intraday Trading Value Strip */}
+    <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-xs flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+      <div className="flex items-center gap-3">
+        <div className="h-10 w-10 rounded-lg bg-teal-50 border border-teal-200 flex items-center justify-center text-teal-700 font-bold shrink-0">
+          <Sparkles className="h-5 w-5" />
+        </div>
+        <div>
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-bold uppercase tracking-wider text-slate-900">
+              Forecast Horizon Error Decay
+            </span>
+            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
+              +{kpis.intradayAccuracyImprovementPct}% Error Reduction
+            </span>
+          </div>
+          <p className="text-xs text-slate-500 mt-0.5 flex items-center gap-1.5 flex-wrap">
+            <span>Assimilation of real-time Doppler radar & turbine SCADA compresses MAE:</span>
+            <span className="font-mono font-bold text-amber-700 bg-amber-50 px-1.5 py-0.2 rounded border border-amber-200">{kpis.maeMw} MW (Day-Ahead)</span>
+            <ArrowRight className="h-3 w-3 text-slate-400 inline" />
+            <span className="font-mono font-bold text-teal-700 bg-teal-50 px-1.5 py-0.2 rounded border border-teal-200">{kpis.intradayMaeMw} MW (Intraday)</span>
+          </p>
+        </div>
+      </div>
+
+      <div className="flex items-center gap-4 text-xs font-mono shrink-0 border-t md:border-t-0 md:border-l border-slate-200 pt-2 md:pt-0 md:pl-4">
+        <div>
+          <span className="text-[10px] text-slate-400 font-sans block">Total Wind Outturn</span>
+          <strong className="text-slate-900">{kpis.totalActualEnergyGWh.toLocaleString()} GWh</strong>
+        </div>
+        <div className="border-l border-slate-200 pl-4">
+          <span className="text-[10px] text-slate-400 font-sans block">Worst Deficit Spike</span>
+          <strong className="text-rose-700">+{kpis.maxOverforecastMw.toLocaleString()} MW</strong>
+        </div>
+      </div>
+    </div>
+  </div>
   );
 };
 

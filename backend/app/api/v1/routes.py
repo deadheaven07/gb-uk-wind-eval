@@ -12,7 +12,7 @@ Exposes high-performance analytical endpoints for the frontend client:
 """
 
 from typing import Optional, List
-from fastapi import APIRouter, Query, HTTPException, Depends
+from fastapi import APIRouter, Query, HTTPException, Depends, Response
 import pandas as pd
 
 from app.schemas.forecast import (
@@ -170,3 +170,21 @@ def refresh_data():
         "status": status,
         "records": len(df)
     }
+
+
+@router.get("/export/csv")
+def export_dataset_csv():
+    """
+    Exports the complete reconciled January 2026 dataset (1,488 settlement half-hours)
+    as a downloadable CSV for trading desk modeling and Excel quantitative audits.
+    """
+    df, _ = get_dataset()
+    csv_bytes = df.to_csv(index=False)
+    return Response(
+        content=csv_bytes,
+        media_type="text/csv",
+        headers={
+            "Content-Disposition": "attachment; filename=gridbricks_january_2026_wind_reconciliation.csv"
+        }
+    )
+

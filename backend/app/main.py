@@ -52,6 +52,7 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,
+    allow_origin_regex=r"https?://(localhost|127\.0\.0\.1)(:[0-9]+)?",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -82,3 +83,4 @@ def root():
         "apiPrefix": settings.API_V1_PREFIX,
         "evaluationWindow": "January 2026 (1,488 Half-Hour Settlement Periods)"
     }
+

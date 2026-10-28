@@ -1,5 +1,6 @@
 import React from 'react';
-import { Wind, Clock, RefreshCw, Calendar } from 'lucide-react';
+import { Wind, Clock, RefreshCw, Calendar, Download } from 'lucide-react';
+import { api } from '../api/client';
 
 interface HeaderProps {
   status: string;
@@ -14,6 +15,9 @@ export const Header: React.FC<HeaderProps> = ({
   isRefreshing,
   onRefresh,
 }) => {
+  const handleExportCsv = () => {
+    window.open(api.getExportCsvUrl(), '_blank');
+  };
   return (
     <header className="bg-white border-b border-slate-200 sticky top-0 z-30 shadow-xs">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3.5 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
@@ -70,6 +74,16 @@ export const Header: React.FC<HeaderProps> = ({
           >
             <RefreshCw className={`h-3.5 w-3.5 text-slate-600 ${isRefreshing ? 'animate-spin' : ''}`} />
             <span>{isRefreshing ? 'Syncing...' : 'Sync Data'}</span>
+          </button>
+
+          {/* Export CSV Button */}
+          <button
+            onClick={handleExportCsv}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 font-semibold shadow-xs transition-colors"
+            title="Download full 1,488 half-hour reconciled dataset as CSV"
+          >
+            <Download className="h-3.5 w-3.5 text-blue-600" />
+            <span>Export CSV</span>
           </button>
         </div>
       </div>
