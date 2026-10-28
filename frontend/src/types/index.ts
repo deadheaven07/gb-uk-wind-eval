@@ -112,3 +112,4 @@ export interface ThermalProcurementResponse {
   netValueAddGbp: number;
   hedgingRationale: string;
 }
+

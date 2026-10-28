@@ -2,11 +2,7 @@ import React from 'react';
 import {
   TrendingUp,
   AlertTriangle,
-  Zap,
   Activity,
-  Layers,
-  ArrowUpRight,
-  ArrowDownRight,
   HelpCircle,
   Clock
 } from 'lucide-react';
@@ -160,3 +156,4 @@ export const MetricKpiCards: React.FC<MetricKpiCardsProps> = ({ kpis, isLoading 
     </div>
   );
 };
+

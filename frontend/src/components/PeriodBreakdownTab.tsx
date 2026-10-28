@@ -99,7 +99,7 @@ export const PeriodBreakdownTab: React.FC<PeriodBreakdownTabProps> = ({
             />
 
             <Tooltip
-              content={({ active, payload, label }) => {
+              content={({ active, payload, label: _label }) => {
                 if (active && payload && payload.length) {
                   const p = payload[0].payload as SettlementPeriodProfile;
                   return (
@@ -172,3 +172,4 @@ export const PeriodBreakdownTab: React.FC<PeriodBreakdownTabProps> = ({
     </div>
   );
 };
+

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Wind, ShieldCheck, Clock, RefreshCw, Calendar, Zap } from 'lucide-react';
+import { Wind, Clock, RefreshCw, Calendar } from 'lucide-react';
 
 interface HeaderProps {
   status: string;
@@ -76,3 +76,4 @@ export const Header: React.FC<HeaderProps> = ({
     </header>
   );
 };
+

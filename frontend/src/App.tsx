@@ -21,9 +21,7 @@ import {
   BarChart2,
   Calendar,
   Clock,
-  ExternalLink,
-  ShieldAlert,
-  Info
+  ShieldAlert
 } from 'lucide-react';
 
 export const App: React.FC = () => {
@@ -208,3 +206,4 @@ export const App: React.FC = () => {
 };
 
 export default App;
+

@@ -3,14 +3,11 @@ import {
   Calculator,
   ShieldCheck,
   TrendingDown,
-  PoundSterling,
   AlertOctagon,
   Sparkles,
-  ArrowRight,
   Flame,
-  Wind,
   Layers,
-  HelpCircle
+  AlertCircle
 } from 'lucide-react';
 import { ThermalProcurementRequest, ThermalProcurementResponse } from '../types';
 import { api } from '../api/client';
@@ -223,6 +220,19 @@ export const ThermalCalculatorTab: React.FC<ThermalCalculatorTabProps> = ({
 
         {/* Right Column: Recommended Procurement & Value Add (7 Cols) */}
         <div className="lg:col-span-7 space-y-5">
+          {error && (
+            <div className="p-3.5 rounded-lg bg-rose-50 border border-rose-200 text-rose-800 text-xs flex items-center gap-2">
+              <AlertCircle className="h-4 w-4 text-rose-600 shrink-0" />
+              <span>{error}</span>
+            </div>
+          )}
+
+          {isLoading && !result && (
+            <div className="bg-white p-8 rounded-xl border border-slate-200 shadow-xs flex items-center justify-center">
+              <span className="text-xs text-slate-400">Recalculating optimal thermal commitment...</span>
+            </div>
+          )}
+
           {result && (
             <>
               {/* Primary Output Decision Card */}
@@ -335,3 +345,4 @@ export const ThermalCalculatorTab: React.FC<ThermalCalculatorTabProps> = ({
 function int(val: number): number {
   return Math.round(val);
 }
+

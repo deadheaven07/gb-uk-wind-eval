@@ -1,5 +1,5 @@
 import React from 'react';
-import { Calendar, CloudLightning, ShieldAlert, Wind, ThermometerSnowflake, Activity } from 'lucide-react';
+import { Calendar, CloudLightning, Wind, ThermometerSnowflake, Activity } from 'lucide-react';
 import { DailyErrorMetric } from '../types';
 
 interface DailyHeatmapTabProps {
@@ -134,3 +134,4 @@ export const DailyHeatmapTab: React.FC<DailyHeatmapTabProps> = ({ dailyData, isL
     </div>
   );
 };
+

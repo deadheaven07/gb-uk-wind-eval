@@ -10,7 +10,7 @@ import {
   ReferenceLine,
   Cell
 } from 'recharts';
-import { ShieldAlert, BarChart3, Info } from 'lucide-react';
+import { BarChart3, Info } from 'lucide-react';
 import { ErrorDistribution } from '../types';
 
 interface ErrorDistributionTabProps {
@@ -96,7 +96,7 @@ export const ErrorDistributionTab: React.FC<ErrorDistributionTabProps> = ({
                 width={50}
               />
               <Tooltip
-                formatter={(value: any, name: any, item: any) => [
+                formatter={(value: any, _name: any, item: any) => [
                   `${value}% (${item.payload.count} settlement periods)`,
                   `Range: ${item.payload.binStart} to ${item.payload.binEnd} MW`
                 ]}
@@ -132,3 +132,4 @@ export const ErrorDistributionTab: React.FC<ErrorDistributionTabProps> = ({
     </div>
   );
 };
+

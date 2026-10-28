@@ -9,10 +9,9 @@ import {
   Tooltip,
   Legend,
   Brush,
-  CartesianGrid,
-  ReferenceLine
+  CartesianGrid
 } from 'recharts';
-import { Calendar, Eye, EyeOff, Sliders, Filter, Sparkles } from 'lucide-react';
+import { Filter } from 'lucide-react';
 import { ForecastDataPoint } from '../types';
 
 interface MainChartProps {
@@ -59,7 +58,7 @@ export const MainChart: React.FC<MainChartProps> = ({ data, isLoading }) => {
   };
 
   // Custom rich tooltip
-  const CustomTooltip = ({ active, payload, label }: any) => {
+  const CustomTooltip = ({ active, payload }: any) => {
     if (active && payload && payload.length) {
       const point: ForecastDataPoint = payload[0].payload;
       const actual = point.actualMw;
@@ -347,3 +346,4 @@ export const MainChart: React.FC<MainChartProps> = ({ data, isLoading }) => {
     </div>
   );
 };
+
