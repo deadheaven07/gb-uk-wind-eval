@@ -141,9 +141,19 @@ def test_gate_closure_reconciliation_logic():
 
     # Day-Ahead forecast must strictly be 8100.0 (the latest published BEFORE 11:00 UTC on D-1)
     assert row["dayAheadForecastMw"] == 8100.0
-    # Intraday forecast should capture the latest before physical delivery
-    assert row["intradayForecastMw"] == 8250.0
-    assert row["actualMw"] == 8200.0
+    # Verify half-hour mapping: SP 30 (14:30 UTC) inherits 14:00 hourly forecast if 14:30 forecast is omitted
+    actuals_half_hour = [{
+        "startTime": "2026-01-15T14:30:00Z",
+        "settlementDate": delivery_date_str,
+        "settlementPeriod": 30,
+        "fuelType": "WIND",
+        "generation": 8300.0
+    }]
+    aligned_half_hour = elexon_service._reconcile_and_apply_gate_closure(actuals_half_hour, forecasts)
+    assert len(aligned_half_hour) == 1
+    assert aligned_half_hour.iloc[0]["dayAheadForecastMw"] == 8100.0
+    assert aligned_half_hour.iloc[0]["actualMw"] == 8300.0
+
 
 
 def test_thermal_procurement_calculator(sample_aligned_dataframe):

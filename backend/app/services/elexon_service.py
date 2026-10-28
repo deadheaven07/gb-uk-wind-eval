@@ -62,7 +62,7 @@ class ElexonService:
 
         # Attempt live API ingestion from Elexon BMRS
         live_df = self._fetch_from_elexon()
-        if live_df is not None and not live_df.empty:
+        if live_df is not None and not live_df.empty and len(live_df) == 1488:
             self._save_to_cache(live_df, "Connected to Elexon BMRS")
             return live_df, "Connected to Elexon BMRS"
 
@@ -180,6 +180,10 @@ class ElexonService:
 
             # Filter forecasts for this delivery target
             matching_fct = df_fct[df_fct["startTime"] == st]
+            # In Elexon WINDFOR, forecasts are published at hourly intervals (:00).
+            # Map half-hour settlement periods (:30) to the corresponding hourly forecast.
+            if matching_fct.empty:
+                matching_fct = df_fct[df_fct["startTime"] == st.floor("h")]
             if matching_fct.empty:
                 continue
 
