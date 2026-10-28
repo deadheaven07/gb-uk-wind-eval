@@ -1,5 +1,8 @@
 # Gridbricks REint AI — 10-Minute Video Demonstration Script
 
+> 📺 **YouTube Video Walkthrough**: [https://www.youtube.com/watch?v=90gMVkPn1Xk](https://www.youtube.com/watch?v=90gMVkPn1Xk)  
+> ⚡ **Recommended Playback Speed**: Please watch in **2x speed** (or 1.5x) for optimal pacing and time efficiency.
+
 ## PRE-FLIGHT SETUP (Do This Before Recording)
 
 * **Tab 1 (Browser):** [https://assignment-grid-bricks.vercel.app/](https://assignment-grid-bricks.vercel.app/) (Full screen, 100% zoom)
@@ -215,3 +218,4 @@ And on GitHub, our Actions CI pipeline automatically runs Ruff, pytest, TypeScri
 The application is deployed and live on Vercel, backed by Render, with full Docker support.
 
 Thank you for watching, and I welcome your review.
+

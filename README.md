@@ -8,10 +8,10 @@
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 [![Live Demo](https://img.shields.io/badge/Vercel-Live_App-black?logo=vercel)](https://assignment-grid-bricks.vercel.app/)
 [![Backend API](https://img.shields.io/badge/Render-API_Online-46e3b7?logo=render)](https://gridbricks-reint-backend.onrender.com/health)
-[![Video Walkthrough](https://img.shields.io/badge/YouTube-Video_Demo-red?logo=youtube)](https://youtu.be/5IVos97Jnj8)
+[![Video Walkthrough](https://img.shields.io/badge/YouTube-Video_Demo-red?logo=youtube)](https://www.youtube.com/watch?v=90gMVkPn1Xk)
 
 > **Key Submission Deliverables:**
-> * **10-Minute Video Demo (YouTube)**: [https://youtu.be/5IVos97Jnj8](https://youtu.be/5IVos97Jnj8)
+> * **10-Minute Video Demo (YouTube)**: [https://www.youtube.com/watch?v=90gMVkPn1Xk](https://www.youtube.com/watch?v=90gMVkPn1Xk) *(Note: Please watch in 2x speed)*
 > * **Production Web Application (Vercel)**: [https://assignment-grid-bricks.vercel.app](https://assignment-grid-bricks.vercel.app)
 > * **Production API Backend (Render)**: [https://gridbricks-reint-backend.onrender.com](https://gridbricks-reint-backend.onrender.com)
 > * **Interactive API Documentation (Swagger/OpenAPI)**: [https://gridbricks-reint-backend.onrender.com/docs](https://gridbricks-reint-backend.onrender.com/docs)
@@ -299,7 +299,7 @@ In compliance with modern engineering governance and transparent submission prac
 ## 8. Deployment and Walkthrough Deliverables
 
 - **Video Walkthrough Deliverable (Unlisted YouTube)**:
-  - **Watch Video Demo**: [https://youtu.be/5IVos97Jnj8](https://youtu.be/5IVos97Jnj8)
+  - **Watch Video Demo**: [https://www.youtube.com/watch?v=90gMVkPn1Xk](https://www.youtube.com/watch?v=90gMVkPn1Xk) *(Recommended: Watch in 2x speed)*
   - **Part 1 (Client Pilot Pitch - max 5 min)**: UK Day-Ahead market challenge, January 2026 outturn scorecard, and interactive Thermal Procurement Decision Tool with empirical P90 risk safety buffering.
   - **Part 2 (Tech Lead Architecture Review - max 5 min)**: Strict 11:00 UTC D-1 reconciliation without look-ahead leakage, causal 1-period lagged non-parametric prediction corridor, atomic `.tmp` cache writes, and the 27-test automated pytest / Ruff CI pipeline.
   - Comprehensive script outline documented in [`docs/VIDEO_DEMO_SCRIPT.md`](docs/VIDEO_DEMO_SCRIPT.md).
