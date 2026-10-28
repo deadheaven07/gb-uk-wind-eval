@@ -15,7 +15,7 @@
 ### The Commercial Challenge in the UK Electricity Market
 Under the **UK Balancing and Settlement Code (BSC)**, wholesale electricity is metered, scheduled, and financially settled across **48 half-hour settlement periods per day (SP 1–48)**. In Great Britain, physical market trading operates with two distinct deadlines that must never be conflated:
 1. **Day-Ahead Auction Deadline (11:00 UTC on Day D-1)**: Day-ahead exchange auctions (EPEX SPOT and Nord Pool UK) close strictly at 11:00 UTC on the day prior to delivery. All commercial commitments for tomorrow's base profile are locked here.
-2. **Balancing Mechanism Gate Closure ($T - 1\text{ hour}$)**: Physical notifications (FPNs) to the Transmission System Operator (National Grid ESO) lock exactly 60 minutes before each individual settlement period begins.
+2. **Balancing Mechanism Gate Closure (T - 1 hour)**: Physical notifications (FPNs) to the Transmission System Operator (National Grid ESO) lock exactly 60 minutes before each individual settlement period begins.
 
 To meet consumer demand for tomorrow, an energy utility's trading desk must decide exactly how much dispatchable thermal power (CCGT / gas peakers / biomass) to procure 24 hours in advance. Wind is intermittent and weather-dependent:
 * **Over-forecasting Wind (Under-procuring Thermal)**: If the Day-Ahead forecast is too high, the utility under-procures thermal power. In real time, the portfolio is short. National Grid ESO must balance the deficit with emergency spinning reserves, slapping the utility with punitive **System Buy Price (SBP)** imbalance cashout penalties (often spiking to £150–£300/MWh during winter stress events).
@@ -27,7 +27,7 @@ Gridbricks REint AI provides:
 2. **Transparent Provenance Tracking**: Categorizes every dataset as `ELEXON_LIVE`, `CACHE`, `SYNTHETIC_DEMO`, or `UNAVAILABLE`. Never misrepresents simulated data as verified Elexon observations.
 3. **Quantitative January 2026 Scorecard**: Evaluates MAE, RMSE, Mean Bias, and Peak vs. Off-Peak error deltas across 1,488 settlement intervals with active coverage tracking.
 4. **Causal P10–P90 Uncertainty Corridors**: Rolling trailing 32-period non-parametric error bands that strictly eliminate future lookahead leakage while giving traders empirical confidence bounds.
-5. **Trader Decision Support Engine**: Converts empirical wind forecast error distributions into quantified **P90 risk safety buffers**, accounting for 30-minute MWh conversions ($0.5\text{ h}$), dispatchable generation capacity limits, and asymmetric cashout spreads.
+5. **Trader Decision Support Engine**: Converts empirical wind forecast error distributions into quantified **P90 risk safety buffers**, accounting for 30-minute MWh conversions (0.5 hours), dispatchable generation capacity limits, and asymmetric cashout spreads.
 
 ---
 
@@ -84,13 +84,13 @@ flowchart TD
 | **Day-Ahead Auction Cutoff** | $\text{publishTime} \le (D - 1\text{d})\text{ 11:00 UTC}$ | Strictly prevents look-ahead data leakage. Day-Ahead auction decisions must use only forecasts published prior to auction submission. Later forecasts are strictly disqualified. |
 | **Physical Gate Closure** | $T_{\text{closure}} = T_{\text{delivery}} - 60\text{ min}$ | Intraday BM Gate Closure. Forecasts published after this cutoff cannot be dispatched into the Balancing Mechanism. |
 | **Half-Hour Energy Conversion** | $E_{\text{MWh}} = P_{\text{MW}} \times 0.5\text{ h}$ | Generation and deficit power rates (MW) deliver energy in MWh over 30 minutes. All financial settlement occurs on MWh. |
-| **Mean Absolute Error (MAE)** | $\text{MAE} = \frac{1}{N}\sum_{i=1}^N \|y_i - \hat{y}_i\|$ | The average expected operational deviation per half-hour, evaluated exclusively over valid pairs without zero-imputation. Normalized as $\text{MAE} / \bar{y} \times 100\%$. |
+| **Mean Absolute Error (MAE)** | $\text{MAE} = \frac{1}{N}\sum_{i=1}^N \lvert y_i - \hat{y}_i \rvert$ | The average expected operational deviation per half-hour, evaluated exclusively over valid pairs without zero-imputation. Normalized as $\text{MAE} / \bar{y} \times 100\%$. |
 | **Root Mean Square Error (RMSE)** | $\text{RMSE} = \sqrt{\frac{1}{N}\sum_{i=1}^N (y_i - \hat{y}_i)^2}$ | Quadratic penalty on large errors. Severe wind drop-offs trigger disproportionately punitive emergency reserve cashout costs. |
 | **Mean Bias** | $\text{Bias} = \frac{1}{N}\sum_{i=1}^N (\hat{y}_i - y_i)$ | Positive = systemic over-forecasting (desk under-hedges thermal, leaving them short). Negative = systemic under-forecasting. |
 | **Causal P10–P90 Corridor** | $[P_{10}(t), P_{90}(t)] = \hat{y}_t + \text{Quantile}_{10, 90}(e_{t-32 \dots t-1})$ | Trailing 32-period (16-hour) empirical rolling quantile. Completely causal: uses only past errors without forward lookahead. |
 | **Base Residual Requirement** | $R_{\text{base}} = \max(0, \text{Demand} - W_{\text{DA}})$ | The deterministic generation deficit between expected consumer demand and Day-Ahead wind forecast. |
 | **P90 Risk Safety Buffer** | $B_{90} = \text{Quantile}_{90}(\max(0, \hat{y} - y))$ | The 90th percentile of historical wind down-forecast errors. Adding $B_{90}$ to $R_{\text{base}}$ shields against 90% of wind shortfall scenarios. |
-| **Capacity Capped Thermal** | $P_{\text{thermal}} = \min(R_{\text{base}} + B, P_{\text{max\_capacity}})$ | Accounts for physical maximum generation constraints of available thermal peaking units. |
+| **Capacity Capped Thermal** | $P_{\text{thermal}} = \min(R_{\text{base}} + B, P_{\text{capacity}})$ | Accounts for physical maximum generation constraints of available thermal peaking units ($P_{\text{capacity}}$). |
 | **Asymmetric Cashout Spread** | $\Delta_{\text{short}} = \text{SBP} - P_{\text{DA}}$, $\Delta_{\text{spill}} = P_{\text{DA}} - \text{SSP}$ | When short, each MWh deficit incurs $\text{SBP} - P_{\text{DA}}$ penalty. When long, spilled excess recovers only $\text{SSP}$. |
 
 ---
@@ -248,7 +248,7 @@ PYTHONPATH=backend pytest backend/tests -v
 9. `test_missing_forecast_does_not_distort_kpis`: Confirms that missing forecast values (`None`) are omitted from error denominators rather than coerced to 0 MW.
 10. `test_cache_validation_rejects_corrupted_datasets`: Verifies that corrupted Parquet schemas, partial row counts (<1,488 rows), or duplicate timestamps are rejected and trigger re-ingestion.
 11. `test_mocked_network_failure_fallback_to_synthetic`: Simulates an Elexon BMRS network outage and verifies honest fallback classification to `SYNTHETIC_DEMO`.
-12. `test_thermal_procurement_calculator`: Verifies residual calculation, P90 risk buffer sizing, $0.5\text{ h}$ energy conversion, and financial cashout exposure reduction.
+12. `test_thermal_procurement_calculator`: Verifies residual calculation, P90 risk buffer sizing, 30-minute (0.5h) energy conversion, and financial cashout exposure reduction.
 13. `test_thermal_procurement_capacity_capping`: Confirms that thermal dispatch is physically bounded by `maxThermalCapacityMw`.
 14. `test_thermal_procurement_extreme_inputs`: Verifies graceful handling of zero demand, negative buffers, and out-of-range market spreads.
 15. `test_api_endpoints_integration`: End-to-end FastAPI integration testing for all live REST endpoints (`/timeseries`, `/kpi`, `/daily-heatmap`, `/thermal-procurement`, `/metadata`, `/export/csv`).
@@ -288,7 +288,7 @@ In compliance with modern engineering governance and transparent submission prac
   - Synthesizing edge-case test matrices for gate-closure reconciliation and thermal capacity constraints.
 * **Human Engineering Oversight & Verification**:
   - All mathematical formulas (MWh half-hour energy conversions, cashout spread asymmetries, P90 empirical non-parametric quantiles) were derived from first principles and validated against manual calculations.
-  - Gate closure semantics were independently cross-referenced against the official **Elexon BSC Section P** and **Nord Pool UK Auction Guidelines** (11:00 UTC D-1 vs $T-1\text{h}$ Gate Closure).
+  - Gate closure semantics were independently cross-referenced against the official **Elexon BSC Section P** and **Nord Pool UK Auction Guidelines** (11:00 UTC D-1 vs T - 1h Gate Closure).
   - All generated code was subjected to strict TypeScript compilation (`tsc --noEmit`) and 15 deterministic automated unit/integration tests running under pytest with zero skipped assertions.
 
 ---
@@ -300,7 +300,7 @@ A structured 5-minute video walkthrough demonstrates the platform's key features
 ### Walkthrough Outline
 1. **0:00–0:45 | UK Market Challenge & Context**
    - Explain the 48 half-hour settlement structure under BSC rules.
-   - Contrast the 11:00 UTC D-1 Day-Ahead auction commitment deadline against real-time physical Gate Closure ($T-1\text{h}$).
+   - Contrast the 11:00 UTC D-1 Day-Ahead auction commitment deadline against real-time physical Gate Closure (T - 1h).
    - Illustrate the commercial pain of asymmetric balancing cashout penalties (System Buy Price vs System Sell Price).
 2. **0:45–1:45 | Ingestion Engine & Lookahead Leakage Prevention**
    - Highlight the strict publication cutoff filter: forecasts published after 11:00 UTC D-1 are rejected.
@@ -312,7 +312,7 @@ A structured 5-minute video walkthrough demonstrates the platform's key features
    - Review executive KPIs: 1,488 settlement intervals, MAE, RMSE, Mean Bias, and Peak vs Off-Peak deviations.
 4. **2:45–4:00 | Trader Decision Support: Thermal Procurement Calculator**
    - Demonstrate real-time P90 risk buffer sizing for peak evening periods.
-   - Explain the $0.5\text{ h}$ energy conversion ($E_{\text{MWh}} = P_{\text{MW}} \times 0.5\text{ h}$) and physical thermal capacity capping.
+   - Explain the 30-minute energy conversion ($E_{\text{MWh}} = P_{\text{MW}} \times 0.5\text{ h}$) and physical thermal capacity capping.
    - Show the financial trade-off: eliminating 90% of shortfall exposure while saving £1,000s in avoided cashout penalties.
 5. **4:00–5:00 | Engineering Discipline, Testing & CI/CD**
    - Review the 15-test automated pytest suite and verified GitHub Actions CI pipeline.
