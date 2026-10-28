@@ -1,0 +1,39 @@
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: gridbricks-reint-backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - APP_NAME=Gridbricks REint AI - UK Wind Decision Intelligence
+      - DEBUG=False
+      - CACHE_DIR=/app/data/cache
+      - GATE_CLOSURE_HOUR_UTC=11
+      - GATE_CLOSURE_MINUTE_UTC=0
+    volumes:
+      - ./backend/data/cache:/app/data/cache
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: gridbricks-reint-frontend
+    restart: unless-stopped
+    ports:
+      - "5173:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+
+networks:
+  default:
+    name: gridbricks-network

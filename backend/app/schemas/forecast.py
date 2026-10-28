@@ -1,0 +1,142 @@
+from typing import List, Optional, Dict
+from pydantic import BaseModel, Field
+
+
+class ForecastDataPoint(BaseModel):
+    """
+    Half-hour settlement period time-series record aligning actual wind generation
+    with Day-Ahead and Intraday forecasts.
+    """
+    startTime: str = Field(..., description="Target delivery start timestamp in ISO UTC (e.g., 2026-01-15T14:30:00Z)")
+    settlementDate: str = Field(..., description="Elexon settlement calendar date (YYYY-MM-DD)")
+    settlementPeriod: int = Field(..., ge=1, le=50, description="Settlement Period identifier (1 to 48 standard, up to 50 for clock-change days)")
+    isPeak: bool = Field(..., description="True if within GB Peak Hours (Settlement Periods 15 to 38, i.e., 07:00-19:00 UTC)")
+    actualMw: float = Field(..., description="Actual wind outturn generation recorded in FUELHH (MW)")
+    dayAheadForecastMw: float = Field(..., description="Latest wind forecast published strictly prior to 11:00 UTC Day D-1 (MW)")
+    intradayForecastMw: float = Field(..., description="Latest available intraday wind forecast prior to physical delivery (MW)")
+    errorMw: float = Field(..., description="Day-Ahead Forecast Error: Forecast - Actual (MW). Positive = Over-forecast; Negative = Under-forecast.")
+    absErrorMw: float = Field(..., description="Absolute forecast error |Forecast - Actual| (MW)")
+    pctError: float = Field(..., description="Percentage error relative to actual outturn (%)")
+    confidenceLowerMw: float = Field(..., description="Empirical 10th percentile lower confidence bound (MW)")
+    confidenceUpperMw: float = Field(..., description="Empirical 90th percentile upper confidence bound (MW)")
+
+
+class KPIMetrics(BaseModel):
+    """
+    Executive quantitative scorecard evaluating forecast performance against outturn
+    across the entire evaluation window (January 2026).
+    """
+    maeMw: float = Field(..., description="Mean Absolute Error (MW) - Average magnitude of generation deviations")
+    maePct: float = Field(..., description="Normalized Mean Absolute Error as a percentage of mean actual outturn (%)")
+    rmseMw: float = Field(..., description="Root Mean Square Error (MW) - Quadratic penalty highlighting severe forecast drop-offs")
+    meanBiasMw: float = Field(..., description="Mean Forecast Error / Bias (MW). Positive = systematic over-forecast; Negative = under-forecast")
+    peakMaeMw: float = Field(..., description="Mean Absolute Error during high-value Peak Periods (SP 15-38, 07:00-19:00 UTC) in MW")
+    offPeakMaeMw: float = Field(..., description="Mean Absolute Error during Off-Peak Periods (SP 1-14 and 39-48) in MW")
+    peakOffPeakDeltaMw: float = Field(..., description="Delta between Peak and Off-Peak MAE (MW)")
+    intradayMaeMw: float = Field(..., description="MAE of the latest Intraday forecast (MW) showing accuracy gain vs Day-Ahead")
+    intradayAccuracyImprovementPct: float = Field(..., description="Percentage reduction in MAE from Day-Ahead to Intraday (%)")
+    maxUnderforecastMw: float = Field(..., description="Worst single-period wind deficit where actual exceeded forecast (MW)")
+    maxOverforecastMw: float = Field(..., description="Worst single-period wind shortfall where actual fell short of forecast (MW)")
+    totalActualEnergyGWh: float = Field(..., description="Total actual wind energy delivered (GWh = sum(MW * 0.5h) / 1000)")
+    totalDayAheadEnergyGWh: float = Field(..., description="Total Day-Ahead scheduled wind energy (GWh)")
+    sampleCount: int = Field(..., description="Total number of evaluated half-hour settlement periods")
+
+
+class HistogramBin(BaseModel):
+    """Single bucket in the forecast error frequency distribution."""
+    binStart: float
+    binEnd: float
+    binCenter: float
+    count: int
+    percentage: float
+
+
+class ErrorDistribution(BaseModel):
+    """
+    Parametric and non-parametric error quantiles for tail-risk analysis.
+    """
+    p05: float = Field(..., description="5th percentile of error distribution (MW)")
+    p10: float = Field(..., description="10th percentile of error distribution (MW)")
+    p25: float = Field(..., description="25th percentile (1st quartile) (MW)")
+    p50: float = Field(..., description="50th percentile / Median error (MW)")
+    p75: float = Field(..., description="75th percentile (3rd quartile) (MW)")
+    p90: float = Field(..., description="90th percentile of error distribution (MW) - Key risk buffer benchmark")
+    p95: float = Field(..., description="95th percentile of error distribution (MW)")
+    p99: float = Field(..., description="99th percentile extreme tail error (MW)")
+    stdDevMw: float = Field(..., description="Sample standard deviation of errors (MW)")
+    skewness: float = Field(..., description="Fisher-Pearson coefficient of skewness")
+    kurtosis: float = Field(..., description="Excess kurtosis (fat tails relative to Gaussian)")
+    histogram: List[HistogramBin] = Field(..., description="Frequency bins for plotting error distribution")
+
+
+class DailyErrorMetric(BaseModel):
+    """
+    Aggregated daily scorecard for the calendar heatmap and volatility diagnostics.
+    """
+    date: str = Field(..., description="Calendar date (YYYY-MM-DD)")
+    maeMw: float = Field(..., description="Daily Mean Absolute Error (MW)")
+    rmseMw: float = Field(..., description="Daily Root Mean Square Error (MW)")
+    meanBiasMw: float = Field(..., description="Daily Mean Bias (MW)")
+    actualMWh: float = Field(..., description="Daily total wind generation outturn (MWh)")
+    dayAheadMWh: float = Field(..., description="Daily Day-Ahead forecast generation (MWh)")
+    volatilityIndex: float = Field(..., description="Normalized intraday ramp volatility score (0-100)")
+    eventCategory: str = Field(..., description="Meteorological regime: e.g. 'Storm Depression', 'Anticyclonic Lull', 'Moderate Westerly', 'Normal'")
+
+
+class SettlementPeriodProfile(BaseModel):
+    """
+    Diurnal profile aggregated across all 31 days of January for each of the 48 settlement periods.
+    """
+    settlementPeriod: int = Field(..., ge=1, le=50)
+    timeUtc: str = Field(..., description="Half-hour time interval (e.g., '14:00 - 14:30 UTC')")
+    isPeak: bool
+    meanActualMw: float
+    meanForecastMw: float
+    maeMw: float
+    rmseMw: float
+    meanBiasMw: float
+
+
+class TimeSeriesResponse(BaseModel):
+    """
+    Full payload for time-series chart rendering with metadata.
+    """
+    status: str = Field(..., description="Status indicator: 'Connected to Elexon BMRS' or 'Local Cache (Verified Fallback)'")
+    cutoffRule: str = Field(..., description="Gate closure policy applied (e.g., '11:00 UTC D-1')")
+    startDate: str
+    endDate: str
+    totalRecords: int
+    data: List[ForecastDataPoint]
+
+
+class ThermalProcurementRequest(BaseModel):
+    """
+    Trader input parameters for calculating optimal dispatchable thermal hedge
+    under wind forecast uncertainty.
+    """
+    expectedDemandMw: float = Field(..., ge=5000.0, le=60000.0, description="Gross forecasted consumer electrical demand (MW)")
+    windForecastMw: Optional[float] = Field(None, description="Day-Ahead Wind Forecast for the target period (MW). If omitted, uses period mean.")
+    settlementPeriod: Optional[int] = Field(None, ge=1, le=50, description="Specific target settlement period (1-48)")
+    riskConfidenceLevel: float = Field(0.90, ge=0.50, le=0.99, description="Target risk coverage quantile (e.g., 0.90 for P90 buffer)")
+    ccgtMarginalCostGbp: Optional[float] = Field(78.50, ge=0.0, description="Combined Cycle Gas Turbine fuel + carbon marginal cost (£/MWh)")
+    systemBuyPriceGbp: Optional[float] = Field(125.00, ge=0.0, description="Expected cashout penalty price if system is short (£/MWh)")
+    systemSellPriceGbp: Optional[float] = Field(42.00, ge=0.0, description="Expected spill cashout price if system is long (£/MWh)")
+    dayAheadPowerPriceGbp: Optional[float] = Field(85.00, ge=0.0, description="Wholesale Day-Ahead base market power price (£/MWh)")
+
+
+class ThermalProcurementResponse(BaseModel):
+    """
+    Actionable procurement recommendation and financial risk hedge matrix
+    delivered to the utility trading desk prior to 11:00 UTC D-1.
+    """
+    demandMw: float
+    windForecastMw: float
+    baseResidualThermalMw: float = Field(..., description="Deterministic residual requirement: Demand - Wind Forecast (MW)")
+    recommendedRiskBufferMw: float = Field(..., description="Quantified risk buffer derived from empirical wind forecast tail error (MW)")
+    recommendedTotalThermalMw: float = Field(..., description="Recommended Day-Ahead thermal procurement commitment (MW)")
+    unbufferedDeficitRiskPct: float = Field(..., description="Probability of wind generation shortfall under naive 0-buffer strategy (%)")
+    bufferedDeficitRiskPct: float = Field(..., description="Residual probability of under-procurement under recommended buffer (%)")
+    expectedImbalanceCostUnbuffered: float = Field(..., description="Expected settlement period cashout loss under naive procurement (£)")
+    expectedImbalanceCostBuffered: float = Field(..., description="Expected settlement period cashout cost with Gridbricks risk buffer (£)")
+    netValueAddGbp: float = Field(..., description="Estimated net monetary savings per half-hour settlement period (£)")
+    hedgingRationale: str = Field(..., description="Executive operational rationale and trading instructions for the desk")

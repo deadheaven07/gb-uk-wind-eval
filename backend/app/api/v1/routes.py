@@ -1,0 +1,172 @@
+"""
+Gridbricks / REint AI - API v1 Router
+=====================================
+
+Exposes high-performance analytical endpoints for the frontend client:
+- Time Series: Joined Actuals, Day-Ahead Forecast (11:00 UTC D-1), Intraday, and Confidence Bands.
+- KPIs: Executive forecast accuracy metrics (MAE, RMSE, Bias, Peak/Off-Peak).
+- Error Distribution: Parametric & non-parametric error quantiles (P10-P90) + Histogram.
+- Daily Breakdown: Calendar heatmap data and volatility categorization.
+- Diurnal Profiles: 48 half-hour settlement period aggregations.
+- Decision Tool: Residual thermal procurement calculator with dynamic risk buffering.
+"""
+
+from typing import Optional, List
+from fastapi import APIRouter, Query, HTTPException, Depends
+import pandas as pd
+
+from app.schemas.forecast import (
+    TimeSeriesResponse,
+    ForecastDataPoint,
+    KPIMetrics,
+    ErrorDistribution,
+    DailyErrorMetric,
+    SettlementPeriodProfile,
+    ThermalProcurementRequest,
+    ThermalProcurementResponse
+)
+from app.services.elexon_service import elexon_service
+from app.services.analytics_service import analytics_service
+
+router = APIRouter()
+
+
+def get_dataset(force_refresh: bool = False) -> tuple[pd.DataFrame, str]:
+    """Dependency helper to load cached or fresh aligned data."""
+    df, status = elexon_service.get_aligned_data(force_refresh=force_refresh)
+    if df.empty:
+        raise HTTPException(status_code=500, detail="Failed to load wind generation dataset.")
+    return df, status
+
+
+@router.get("/timeseries", response_model=TimeSeriesResponse)
+def get_timeseries(
+    startDate: Optional[str] = Query(None, description="Filter start date YYYY-MM-DD"),
+    endDate: Optional[str] = Query(None, description="Filter end date YYYY-MM-DD"),
+    peakOnly: Optional[bool] = Query(False, description="Filter to peak hours only (SP 15-38)"),
+    settlementPeriod: Optional[int] = Query(None, ge=1, le=50, description="Filter to specific half-hour period"),
+    forceRefresh: Optional[bool] = Query(False, description="Force re-fetch from Elexon / cache")
+):
+    """
+    Returns the time-series of half-hourly wind generation actuals and Day-Ahead forecasts.
+    Guaranteed lookahead-free: Day-Ahead forecast matches 11:00 UTC D-1 Gate Closure.
+    """
+    df, status = get_dataset(force_refresh=forceRefresh)
+
+    filtered_df = df.copy()
+    if startDate:
+        filtered_df = filtered_df[filtered_df["settlementDate"] >= startDate]
+    if endDate:
+        filtered_df = filtered_df[filtered_df["settlementDate"] <= endDate]
+    if peakOnly:
+        filtered_df = filtered_df[filtered_df["isPeak"] == True]
+    if settlementPeriod:
+        filtered_df = filtered_df[filtered_df["settlementPeriod"] == settlementPeriod]
+
+    data_points = [
+        ForecastDataPoint(
+            startTime=row["startTime"],
+            settlementDate=row["settlementDate"],
+            settlementPeriod=int(row["settlementPeriod"]),
+            isPeak=bool(row["isPeak"]),
+            actualMw=float(row["actualMw"]),
+            dayAheadForecastMw=float(row["dayAheadForecastMw"]),
+            intradayForecastMw=float(row["intradayForecastMw"]),
+            errorMw=float(row["errorMw"]),
+            absErrorMw=float(row["absErrorMw"]),
+            pctError=float(row["pctError"]),
+            confidenceLowerMw=float(row["confidenceLowerMw"]),
+            confidenceUpperMw=float(row["confidenceUpperMw"])
+        )
+        for _, row in filtered_df.iterrows()
+    ]
+
+    return TimeSeriesResponse(
+        status=status,
+        cutoffRule="11:00 UTC D-1 Gate Closure",
+        startDate=str(filtered_df["settlementDate"].min()) if not filtered_df.empty else "2026-01-01",
+        endDate=str(filtered_df["settlementDate"].max()) if not filtered_df.empty else "2026-01-31",
+        totalRecords=len(data_points),
+        data=data_points
+    )
+
+
+@router.get("/kpi", response_model=KPIMetrics)
+def get_kpis(
+    startDate: Optional[str] = Query(None),
+    endDate: Optional[str] = Query(None)
+):
+    """
+    Calculates executive-level forecast scorecard metrics (MAE, RMSE, Bias, Peak vs Off-Peak).
+    """
+    df, _ = get_dataset()
+    filtered_df = df.copy()
+    if startDate:
+        filtered_df = filtered_df[filtered_df["settlementDate"] >= startDate]
+    if endDate:
+        filtered_df = filtered_df[filtered_df["settlementDate"] <= endDate]
+
+    return analytics_service.calculate_kpis(filtered_df)
+
+
+@router.get("/error-distribution", response_model=ErrorDistribution)
+def get_error_distribution(
+    numBins: int = Query(25, ge=10, le=60, description="Number of histogram frequency bins"),
+    startDate: Optional[str] = Query(None),
+    endDate: Optional[str] = Query(None)
+):
+    """
+    Returns non-parametric error quantiles (P10, P50, P90) and frequency histogram
+    for tail-risk analysis.
+    """
+    df, _ = get_dataset()
+    filtered_df = df.copy()
+    if startDate:
+        filtered_df = filtered_df[filtered_df["settlementDate"] >= startDate]
+    if endDate:
+        filtered_df = filtered_df[filtered_df["settlementDate"] <= endDate]
+
+    return analytics_service.calculate_error_distribution(filtered_df, num_bins=numBins)
+
+
+@router.get("/daily-heatmap", response_model=List[DailyErrorMetric])
+def get_daily_heatmap():
+    """
+    Returns daily aggregated error metrics and meteorological regime classifications
+    for January 2026 calendar heatmap.
+    """
+    df, _ = get_dataset()
+    return analytics_service.calculate_daily_breakdown(df)
+
+
+@router.get("/settlement-profiles", response_model=List[SettlementPeriodProfile])
+def get_settlement_profiles():
+    """
+    Returns average diurnal profiles across all 48 settlement periods.
+    """
+    df, _ = get_dataset()
+    return analytics_service.calculate_settlement_period_profiles(df)
+
+
+@router.post("/thermal-procurement", response_model=ThermalProcurementResponse)
+def calculate_thermal_procurement(request: ThermalProcurementRequest):
+    """
+    Trader Decision Support Tool:
+    Computes net residual thermal power requirement (Demand - Wind) and applies
+    empirical P90 risk safety buffer to mitigate asymmetric cashout penalties.
+    """
+    df, _ = get_dataset()
+    return analytics_service.calculate_thermal_procurement(df, request)
+
+
+@router.post("/refresh-data")
+def refresh_data():
+    """
+    Forces cache invalidation and re-ingestion from Elexon BMRS.
+    """
+    df, status = elexon_service.get_aligned_data(force_refresh=True)
+    return {
+        "message": "Dataset refreshed successfully.",
+        "status": status,
+        "records": len(df)
+    }
