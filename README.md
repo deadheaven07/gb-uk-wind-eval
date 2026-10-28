@@ -1,6 +1,6 @@
 # Gridbricks REint AI | UK Day-Ahead Wind Decision Intelligence Platform
 
-[![CI Pipeline](https://github.com/deadheaven07/Assignment_GridBricks/actions/workflows/ci.yml/badge.svg)](https://github.com/deadheaven07/Assignment_GridBricks/actions/workflows/ci.yml)
+[![CI Pipeline](https://github.com/deadheaven07/Assignment_GridBricks/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/deadheaven07/Assignment_GridBricks/actions/workflows/ci.yml)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.110+-009688.svg)](https://fastapi.tiangolo.com/)
 [![React 18](https://img.shields.io/badge/React-18-61dafb.svg)](https://reactjs.org/)
@@ -213,21 +213,43 @@ Open [http://localhost:5173](http://localhost:5173) in your browser.
 
 ---
 
-## 7. Automated Testing Suite
+## 7. Automated Testing Suite & CI/CD Pipeline
 
-The backend test suite verifies all mathematical calculations and domain constraints:
+### Automated Testing Suite
+The platform includes an automated pytest suite covering mathematical formulas, BSC domain rules, gate closure enforcement, and API endpoints:
 
 ```bash
 PYTHONPATH=backend pytest backend/tests -v
 ```
 
-### Test Coverage Highlights:
-* `test_mae_and_rmse_calculations`: Mathematically verifies MAE, RMSE, and Bias against known arrays.
+#### Test Coverage Highlights:
+* `test_mae_and_rmse_calculations`: Mathematically verifies MAE, RMSE, and Bias against known deterministic arrays.
 * `test_peak_vs_offpeak_metrics`: Validates strict partitioning of Settlement Periods 15–38 (07:00–19:00 UTC).
-* `test_error_distribution_quantiles`: Verifies P10, P50, and P90 non-parametric percentiles.
-* `test_gate_closure_reconciliation_logic`: **Verifies that any forecast published after 11:00 UTC on Day D-1 is strictly rejected from Day-Ahead bidding candidates**, preventing lookahead leakage.
-* `test_thermal_procurement_calculator`: Verifies residual calculation, P90 risk buffer sizing, and cashout savings.
-* `test_api_endpoints_integration`: End-to-end FastAPI test client testing all REST endpoints.
+* `test_error_distribution_quantiles`: Verifies P10, P50, and P90 non-parametric percentile boundaries.
+* `test_gate_closure_reconciliation_logic`: **Verifies that any forecast published after 11:00 UTC on Day D-1 is strictly rejected from Day-Ahead bidding candidates**, preventing lookahead leakage, and validates half-hour settlement period forecast inheritance.
+* `test_thermal_procurement_calculator`: Verifies residual calculation, P90 risk buffer sizing, and financial cashout exposure reduction.
+* `test_api_endpoints_integration`: End-to-end FastAPI integration testing for all live REST endpoints (`/timeseries`, `/kpi`, `/daily-heatmap`, `/thermal-procurement`, `/export/csv`).
+
+---
+
+### GitHub Actions CI Pipeline
+Every push and pull request to the `main` branch automatically triggers our continuous integration pipeline defined in [`.github/workflows/ci.yml`](.github/workflows/ci.yml):
+
+```mermaid
+flowchart LR
+    COMMIT["Git Push / PR (main)"] --> CI["GitHub Actions CI Pipeline"]
+    CI --> BACKEND["Backend Lint & Pytest Suite<br/>(Python 3.11 / Pytest / Cache)"]
+    CI --> FRONTEND["Frontend Typecheck & Build<br/>(Node 20 / tsc / Vite Build)"]
+    BACKEND --> PASS{"All Checks Green"}
+    FRONTEND --> PASS
+    PASS --> BADGE["CI Pipeline: passing"]
+```
+
+#### CI Workflow Matrix:
+| Job | Runtime Environment | Tasks Executed | Status |
+| :--- | :--- | :--- | :--- |
+| **Backend Lint & Pytest Suite** | `ubuntu-latest` / Python 3.11 | Pip cache restoration (`cache-dependency-path: backend/requirements.txt`), dependency installation, isolated environment setup (`CACHE_DIR: /tmp/cache`), and execution of the complete unit & integration test suite (`pytest`). | [![Passing](https://img.shields.io/badge/status-passing-22c55e.svg)](https://github.com/deadheaven07/Assignment_GridBricks/actions/workflows/ci.yml) |
+| **Frontend Typecheck & Build** | `ubuntu-latest` / Node 20 | NPM package cache restoration (`frontend/package.json`), clean dependency install (`npm ci`), strict TypeScript compiler typecheck (`tsc --noEmit`), and production Vite bundling. | [![Passing](https://img.shields.io/badge/status-passing-22c55e.svg)](https://github.com/deadheaven07/Assignment_GridBricks/actions/workflows/ci.yml) |
 
 ---
 
