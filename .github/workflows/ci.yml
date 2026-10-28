@@ -27,6 +27,10 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r backend/requirements.txt
 
+      - name: Run Ruff Linter
+        run: |
+          ruff check backend/
+
       - name: Run Pytest Unit & Integration Tests
         env:
           CACHE_DIR: /tmp/cache
@@ -56,5 +60,6 @@ jobs:
       - name: Run TypeScript Check & Vite Build
         working-directory: ./frontend
         run: |
+          npm run lint
           npm run build
 

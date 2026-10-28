@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { X, Database, ShieldCheck, AlertTriangle, CheckCircle2 } from 'lucide-react';
 import { DatasetMetadata } from '../types';
 
@@ -13,14 +13,22 @@ export const DatasetDetailsModal: React.FC<DatasetDetailsModalProps> = ({
   onClose,
   metadata,
 }) => {
+  const previousActiveElement = useRef<HTMLElement | null>(null);
+
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
     if (isOpen) {
+      previousActiveElement.current = document.activeElement as HTMLElement;
+      const handleKeyDown = (e: KeyboardEvent) => {
+        if (e.key === 'Escape') onClose();
+      };
       window.addEventListener('keydown', handleKeyDown);
+      return () => {
+        window.removeEventListener('keydown', handleKeyDown);
+        if (previousActiveElement.current) {
+          previousActiveElement.current.focus();
+        }
+      };
     }
-    return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isOpen, onClose]);
 
   if (!isOpen || !metadata) return null;
@@ -109,9 +117,15 @@ export const DatasetDetailsModal: React.FC<DatasetDetailsModalProps> = ({
           <div className="p-3 bg-slate-50 rounded-lg border border-slate-200">
             <span className="text-slate-500 block text-[10px] font-semibold uppercase">P10-P90 Corridor Coverage</span>
             <span className="font-bold font-mono text-slate-900 text-sm mt-0.5 block">
-              {metadata.empiricalCoverageP10P90Pct ? `${metadata.empiricalCoverageP10P90Pct}%` : '81.4%'}
+              {metadata.empiricalCoverageP10P90Pct !== null && metadata.empiricalCoverageP10P90Pct !== undefined
+                ? `${metadata.empiricalCoverageP10P90Pct}%`
+                : 'Not available'}
             </span>
-            <span className="text-slate-400 text-[10px]">Empirically evaluated on outturns</span>
+            <span className="text-slate-400 text-[10px]">
+              {metadata.empiricalCoverageSampleCount
+                ? `Evaluated over ${metadata.empiricalCoverageSampleCount} calibrated intervals`
+                : 'Initial warm-up periods excluded'}
+            </span>
           </div>
 
           <div className="p-3 bg-slate-50 rounded-lg border border-slate-200">

@@ -87,6 +87,7 @@ export interface SettlementPeriodProfile {
 export interface DatasetMetadata {
   source: DataSourceType;
   isSynthetic: boolean;
+  isCached?: boolean;
   warning?: string | null;
   lastUpdatedAt?: string | null;
   cutoffRule: string;
@@ -96,12 +97,14 @@ export interface DatasetMetadata {
   validRecords: number;
   coveragePct: number;
   empiricalCoverageP10P90Pct?: number | null;
+  empiricalCoverageSampleCount?: number | null;
 }
 
 export interface TimeSeriesResponse {
   status: string;
   source?: DataSourceType;
   isSynthetic?: boolean;
+  isCached?: boolean;
   warning?: string | null;
   lastUpdatedAt?: string | null;
   cutoffRule: string;
@@ -111,6 +114,7 @@ export interface TimeSeriesResponse {
   validRecords?: number;
   coveragePct?: number;
   empiricalCoverageP10P90Pct?: number | null;
+  empiricalCoverageSampleCount?: number | null;
   data: ForecastDataPoint[];
 }
 
@@ -141,11 +145,16 @@ export interface ThermalProcurementResponse {
   windForecastMw: number;
   actualOutturnMw?: number;
   selectedPeriodLabel?: string;
+  isHistoricalForecastAvailable?: boolean;
+  historicalDataQualityNotice?: string | null;
   baseResidualThermalMw: number;
   recommendedRiskBufferMw: number;
+  effectiveRiskBufferMw?: number;
   recommendedTotalThermalMw: number;
   isCapacityConstrained?: boolean;
+  isCapacityBelowBaseResidual?: boolean;
   unconstrainedTotalThermalMw?: number;
+  unservedBaseDeficitMw?: number;
   unbufferedDeficitRiskPct: number;
   bufferedDeficitRiskPct: number;
   expectedImbalanceCostUnbuffered: number;

@@ -19,22 +19,18 @@ Deterministic Unit & Integration Tests:
 Author: Senior Energy Software Engineer
 """
 
-from datetime import datetime, time, timedelta, timezone
-from unittest.mock import patch, MagicMock
-import pytest
-import requests
+from pathlib import Path
+from unittest.mock import patch
+
 import numpy as np
 import pandas as pd
-from fastapi.testclient import TestClient
-
+import pytest
+import requests
 from app.main import app
+from app.schemas.forecast import DataSourceType, ThermalProcurementRequest
 from app.services.analytics_service import analytics_service
-from app.services.elexon_service import elexon_service, ElexonService
-from app.schemas.forecast import (
-    ThermalProcurementRequest,
-    DataSourceType,
-    DatasetMetadata
-)
+from app.services.elexon_service import ElexonService, elexon_service
+from fastapi.testclient import TestClient
 
 
 @pytest.fixture
@@ -180,7 +176,7 @@ def test_all_forecasts_after_cutoff_strictly_rejected():
 
     # Must be None/NaN - no lookahead leakage
     assert pd.isna(row["dayAheadForecastMw"])
-    assert row["isMissingForecast"] == True
+    assert bool(row["isMissingForecast"]) is True
     # Intraday should still pick up the forecast published before T-1h (13:00 UTC)
     assert row["intradayForecastMw"] == 8450.0
 
@@ -386,7 +382,301 @@ def test_thermal_procurement_extreme_inputs(sample_aligned_dataframe):
 
 
 # ---------------------------------------------------------------------------
-# 5. FastAPI Live Integration Tests
+# 5. Advanced Causal Corridor & Edge Case Regression Tests
+# ---------------------------------------------------------------------------
+
+def test_exact_candidate_ineligible_hourly_fallback_selected():
+    """
+    Stage 1 Critical Test:
+    When an exact half-hour candidate exists but was published AFTER cutoff,
+    the pipeline must NOT overlook an eligible hourly fallback for that interval!
+    """
+    delivery_date_str = "2026-01-15"
+    st = "2026-01-15T14:30:00Z"  # SP 30
+
+    actuals = [{
+        "startTime": st,
+        "settlementDate": delivery_date_str,
+        "settlementPeriod": 30,
+        "fuelType": "WIND",
+        "generation": 8000.0
+    }]
+
+    forecasts = [
+        # Hourly candidate published at 10:30 UTC D-1 (ELIGIBLE)
+        {"startTime": "2026-01-15T14:00:00Z", "publishTime": "2026-01-14T10:30:00Z", "generation": 7900.0},
+        # Exact half-hour candidate published at 11:30 UTC D-1 (LATE / INELIGIBLE)
+        {"startTime": st, "publishTime": "2026-01-14T11:30:00Z", "generation": 8400.0}
+    ]
+
+    aligned_df = elexon_service._reconcile_and_apply_gate_closure(actuals, forecasts)
+    row = aligned_df.iloc[0]
+
+    # Must select the eligible hourly forecast (7900 MW) rather than None or leaking the late 8400 MW!
+    assert row["dayAheadForecastMw"] == 7900.0
+    # Intraday (published before 13:30 UTC) can pick up the late exact forecast (8400 MW)
+    assert row["intradayForecastMw"] == 8400.0
+
+
+def test_causal_corridor_does_not_leak_future_data():
+    """
+    Stage 2 Critical Test:
+    Proves causality: altering future observations must NOT alter past or current corridor bounds!
+    """
+    np.random.seed(42)
+    # 96 half-hours (2 full days)
+    dates = pd.date_range("2026-01-01", periods=96, freq="30min")
+    df1 = pd.DataFrame({
+        "startTime": [d.isoformat() for d in dates],
+        "settlementDate": [d.strftime("%Y-%m-%d") for d in dates],
+        "settlementPeriod": [((i % 48) + 1) for i in range(96)],
+        "isPeak": [15 <= ((i % 48) + 1) <= 38 for i in range(96)],
+        "actualMw": [5000.0 + (i * 10) for i in range(96)],
+        "dayAheadForecastMw": [4900.0 + (i * 10) for i in range(96)],
+    })
+
+    res1 = elexon_service._post_process_aligned_df(df1.copy())
+
+    # Create df2: exactly identical for the first 50 rows, but radically alters rows 51-95 (extreme outturns)
+    df2 = df1.copy()
+    df2.loc[51:95, "actualMw"] = 25000.0  # Massive future shock
+
+    res2 = elexon_service._post_process_aligned_df(df2.copy())
+
+    # The bounds at index 40 (past) must be 100% IDENTICAL between res1 and res2!
+    assert res1.loc[40, "confidenceLowerMw"] == res2.loc[40, "confidenceLowerMw"]
+    assert res1.loc[40, "confidenceUpperMw"] == res2.loc[40, "confidenceUpperMw"]
+
+
+def test_causal_corridor_excludes_current_interval_outcome():
+    """
+    Stage 2 Critical Test:
+    Proves that interval t's own residual is NOT included in interval t's uncertainty bounds.
+    (Verified via the 1-period shift).
+    """
+    dates = pd.date_range("2026-01-01", periods=50, freq="30min")
+    # Base history with zero error (actual = forecast = 5000)
+    df = pd.DataFrame({
+        "startTime": [d.isoformat() for d in dates],
+        "settlementDate": [d.strftime("%Y-%m-%d") for d in dates],
+        "settlementPeriod": [((i % 48) + 1) for i in range(50)],
+        "isPeak": False,
+        "actualMw": [5000.0] * 50,
+        "dayAheadForecastMw": [5000.0] * 50,
+    })
+
+    # At rows 25 through 35, inject significant shocks (+5000 MW residual)
+    df.loc[25:35, "actualMw"] = 10000.0
+
+    res = elexon_service._post_process_aligned_df(df.copy())
+
+    # Prior to row 25, all shifted residuals were 0.0.
+    # Therefore, at row 25, shifted residuals in the window are still ALL 0.0!
+    # Interval 25's own shock has NOT yet occurred in the history observable at row 25!
+    assert res.loc[25, "confidenceLowerMw"] == 5000.0
+    assert res.loc[25, "confidenceUpperMw"] == 5000.0
+
+    # But by row 30, prior shocks from rows 25-29 HAVE entered the shifted history:
+    assert res.loc[30, "confidenceUpperMw"] > 5000.0
+
+
+def test_causal_corridor_warmup_unavailable_and_no_backfill():
+    """
+    Stage 2 Critical Test:
+    Verifies that initial warm-up periods (< min_periods=12) return NaN bounds
+    and are NOT backfilled with future data.
+    """
+    dates = pd.date_range("2026-01-01", periods=30, freq="30min")
+    df = pd.DataFrame({
+        "startTime": [d.isoformat() for d in dates],
+        "settlementDate": [d.strftime("%Y-%m-%d") for d in dates],
+        "settlementPeriod": [((i % 48) + 1) for i in range(30)],
+        "isPeak": False,
+        "actualMw": [5000.0] * 30,
+        "dayAheadForecastMw": [5000.0] * 30,
+    })
+
+    res = elexon_service._post_process_aligned_df(df)
+
+    # First 12 intervals (0 through 11) must have NaN bounds (warmup)
+    for i in range(12):
+        assert pd.isna(res.loc[i, "confidenceLowerMw"])
+        assert pd.isna(res.loc[i, "confidenceUpperMw"])
+
+    # From interval 12 onwards, bounds must be valid numbers
+    assert pd.notna(res.loc[12, "confidenceLowerMw"])
+    assert pd.notna(res.loc[12, "confidenceUpperMw"])
+
+
+def test_corridor_quantiles_strictly_ordered():
+    """
+    Stage 2 Critical Test:
+    Verifies that for every valid interval, confidenceLowerMw <= confidenceUpperMw.
+    """
+    dates = pd.date_range("2026-01-01", periods=60, freq="30min")
+    # Alternating positive and negative errors
+    df = pd.DataFrame({
+        "startTime": [d.isoformat() for d in dates],
+        "settlementDate": [d.strftime("%Y-%m-%d") for d in dates],
+        "settlementPeriod": [((i % 48) + 1) for i in range(60)],
+        "isPeak": False,
+        "actualMw": [5000.0 + (300.0 if i % 2 == 0 else -300.0) for i in range(60)],
+        "dayAheadForecastMw": [5000.0 for _ in range(60)],
+    })
+
+    res = elexon_service._post_process_aligned_df(df)
+    valid_bounds = res[res["confidenceLowerMw"].notna() & res["confidenceUpperMw"].notna()]
+    assert len(valid_bounds) > 0
+    assert (valid_bounds["confidenceLowerMw"] <= valid_bounds["confidenceUpperMw"]).all()
+
+
+def test_thermal_procurement_capacity_below_base_residual(sample_aligned_dataframe):
+    """
+    Stage 3 Critical Test:
+    Verifies that when thermal fleet capacity is BELOW the base residual requirement,
+    the model detects the unserved base deficit and sets deficit risk to 100%.
+    """
+    req = ThermalProcurementRequest(
+        expectedDemandMw=35000.0,
+        windForecastMw=10000.0,  # Base residual = 25000 MW
+        maxThermalCapacityMw=20000.0,  # 5000 MW below base residual!
+        riskConfidenceLevel=0.90
+    )
+
+    resp = analytics_service.calculate_thermal_procurement(sample_aligned_dataframe, req)
+
+    assert resp.isCapacityBelowBaseResidual is True
+    assert resp.isCapacityConstrained is True
+    assert resp.unservedBaseDeficitMw == 5000.0
+    assert resp.recommendedTotalThermalMw == 20000.0
+    assert resp.effectiveRiskBufferMw == 0.0
+    # Because capacity cannot even meet demand with zero wind error, shortfall risk is 100%!
+    assert resp.bufferedDeficitRiskPct == 100.0
+    assert "CRITICAL" in resp.hedgingRationale
+
+
+def test_thermal_procurement_negative_net_value_preserved(sample_aligned_dataframe):
+    """
+    Stage 3 Critical Test:
+    Verifies that when thermal buffer carry cost exceeds avoided cashout penalties,
+    the net value add is preserved as a negative figure rather than being clamped to zero.
+    """
+    req = ThermalProcurementRequest(
+        expectedDemandMw=20000.0,
+        windForecastMw=5000.0,
+        ccgtMarginalCostGbp=180.0,  # Very expensive peaker carry cost (£180 - £85 = £95/MWh carry spread)
+        systemBuyPriceGbp=90.0,     # Very mild penalty spread (£90 - £85 = £5/MWh penalty spread)
+        dayAheadPowerPriceGbp=85.0
+    )
+
+    resp = analytics_service.calculate_thermal_procurement(sample_aligned_dataframe, req)
+
+    # Net value add must be negative because buffer carry cost (£95/MWh) >> penalty spread (£5/MWh)
+    assert resp.netValueAddGbp < 0.0
+
+
+def test_thermal_procurement_historical_missing_forecast_notice(sample_aligned_dataframe):
+    """
+    Stage 3 Critical Test:
+    Verifies that when a requested historical interval has NO eligible pre-cutoff forecast,
+    it is explicitly flagged with isHistoricalForecastAvailable=False and quality notice.
+    """
+    df = sample_aligned_dataframe.copy()
+    # Mask SP 35 on 2026-01-01 as missing forecast
+    idx = df[(df["settlementDate"] == "2026-01-01") & (df["settlementPeriod"] == 35)].index
+    df.loc[idx, "dayAheadForecastMw"] = np.nan
+
+    req = ThermalProcurementRequest(
+        expectedDemandMw=30000.0,
+        targetDate="2026-01-01",
+        settlementPeriod=35
+    )
+
+    resp = analytics_service.calculate_thermal_procurement(df, req)
+    assert resp.isHistoricalForecastAvailable is False
+    assert resp.historicalDataQualityNotice is not None
+    assert "No eligible Day-Ahead forecast" in resp.historicalDataQualityNotice
+
+
+def test_provenance_preservation_across_cache_reload(tmp_path):
+    """
+    Stage 4 Critical Test:
+    Verifies that a synthetic demo dataset stored in cache REMAINS classified as SYNTHETIC_DEMO
+    when reloaded, and is NOT deceptively relabeled as verified Elexon data.
+    """
+    service = ElexonService(cache_dir=str(tmp_path))
+
+    # Generate synthetic demo data and save to cache
+    synth_df = service._generate_synthetic_january_2026()
+    meta = service._build_metadata(
+        synth_df,
+        source=DataSourceType.SYNTHETIC_DEMO,
+        is_synthetic=True,
+        warning="Synthetic test dataset"
+    )
+    service._save_to_cache(synth_df, meta)
+
+    # Reload from cache
+    reloaded_df = pd.read_parquet(service.parquet_path)
+    reloaded_meta = service._read_metadata(reloaded_df)
+
+    assert reloaded_meta.source == DataSourceType.SYNTHETIC_DEMO
+    assert reloaded_meta.isSynthetic is True
+    assert reloaded_meta.isCached is True
+    assert "Synthetic" in (reloaded_meta.warning or "")
+
+
+def test_atomic_cache_writes(tmp_path):
+    """
+    Stage 4 Critical Test:
+    Verifies that atomic write produces valid Parquet, SQLite, and Metadata JSON without leftover .tmp files.
+    """
+    service = ElexonService(cache_dir=str(tmp_path))
+    synth_df = service._generate_synthetic_january_2026()
+    meta = service._build_metadata(synth_df, source=DataSourceType.SYNTHETIC_DEMO, is_synthetic=True)
+
+    service._save_to_cache(synth_df, meta)
+
+    assert service.parquet_path.exists()
+    assert service.sqlite_path.exists()
+    assert service.metadata_path.exists()
+
+    # Ensure no lingering .tmp files
+    tmp_files = list(Path(tmp_path).glob("*.tmp"))
+    assert len(tmp_files) == 0
+
+
+def test_date_range_validation_api():
+    """
+    Stage 5 Critical Test:
+    Verifies that startDate > endDate and invalid date formats return HTTP 400.
+    """
+    client = TestClient(app)
+
+    # Case A: startDate after endDate
+    resp_inverted = client.get("/api/v1/timeseries?startDate=2026-01-15&endDate=2026-01-10")
+    assert resp_inverted.status_code == 400
+    assert "startDate cannot be after endDate" in resp_inverted.json()["detail"]
+
+    # Case B: Invalid date format
+    resp_invalid = client.get("/api/v1/timeseries?startDate=not-a-date")
+    assert resp_invalid.status_code == 400
+    assert "Invalid startDate format" in resp_invalid.json()["detail"]
+
+
+def test_empty_date_filter_returns_404():
+    """
+    Stage 5 Critical Test:
+    Verifies that querying out-of-range dates on KPI endpoint returns a clean HTTP 404.
+    """
+    client = TestClient(app)
+    resp = client.get("/api/v1/kpi?startDate=2026-02-01&endDate=2026-02-10")
+    assert resp.status_code == 404
+    assert "No settlement data" in resp.json()["detail"]
+
+
+# ---------------------------------------------------------------------------
+# 6. FastAPI Live Integration Tests
 # ---------------------------------------------------------------------------
 
 def test_api_endpoints_integration():

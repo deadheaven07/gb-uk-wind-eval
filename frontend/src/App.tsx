@@ -62,6 +62,7 @@ export const App: React.FC = () => {
       setMetadata(metaRes || {
         source: tsRes.source || 'CACHE',
         isSynthetic: tsRes.isSynthetic || false,
+        isCached: tsRes.isCached || false,
         warning: tsRes.warning,
         cutoffRule: tsRes.cutoffRule,
         startDate: tsRes.startDate,
@@ -70,6 +71,7 @@ export const App: React.FC = () => {
         validRecords: tsRes.validRecords || tsRes.totalRecords,
         coveragePct: tsRes.coveragePct || 100.0,
         empiricalCoverageP10P90Pct: tsRes.empiricalCoverageP10P90Pct,
+        empiricalCoverageSampleCount: tsRes.empiricalCoverageSampleCount,
         lastUpdatedAt: tsRes.lastUpdatedAt
       });
       setKpis(kpiRes);
@@ -208,7 +210,13 @@ export const App: React.FC = () => {
           {/* Active Tab View */}
           <div className="pt-2">
             {activeTab === 'calculator' && (
-              <ThermalCalculatorTab defaultWindForecast={kpis ? Math.round(kpis.totalDayAheadEnergyGWh * 1000 / 1488) : 8500} />
+              <ThermalCalculatorTab
+                defaultWindForecast={
+                  kpis && kpis.validSampleCount && kpis.validSampleCount > 0
+                    ? Math.round((kpis.totalDayAheadEnergyGWh * 1000) / (kpis.validSampleCount * 0.5))
+                    : 8500
+                }
+              />
             )}
             {activeTab === 'distribution' && (
               <ErrorDistributionTab distribution={distribution} isLoading={isLoading} />

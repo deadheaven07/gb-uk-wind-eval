@@ -37,20 +37,21 @@ Author: Senior Energy Software Engineer
 """
 
 import logging
-from typing import List, Dict, Any, Optional
+from typing import List
+
 import numpy as np
 import pandas as pd
 
 from app.core.config import settings
 from app.schemas.forecast import (
-    KPIMetrics,
+    CashoutSensitivityScenario,
+    DailyErrorMetric,
     ErrorDistribution,
     HistogramBin,
-    DailyErrorMetric,
+    KPIMetrics,
     SettlementPeriodProfile,
     ThermalProcurementRequest,
     ThermalProcurementResponse,
-    CashoutSensitivityScenario
 )
 
 logger = logging.getLogger("gridbricks.analytics")
@@ -346,13 +347,41 @@ class AnalyticsService:
     ) -> ThermalProcurementResponse:
         """
         Trader Decision Support Engine:
-        Calculates optimal Day-Ahead dispatchable thermal power procurement (CCGT / biomass)
-        and risk safety buffers to safeguard against asymmetric imbalance cashout penalties.
+        Calculates optimal Day-Ahead dispatchable thermal power procurement (CCGT / peakers)
+        and empirical risk safety buffers to safeguard against asymmetric balancing mechanism cashout penalties.
         Supports Market Aggregate mode, Historical Replay, and thermal fleet capacity constraints.
+
+        Mathematical & Financial Formulations:
+        1. Settlement Period Duration:
+           Each GB settlement period is exactly 30 minutes (0.5 hours). Power (MW) converts to
+           energy (MWh) via: E_MWh = P_MW * 0.5 h. All financial settlement occurs on MWh.
+        2. Shortfall vs Surplus Definition:
+           For each evaluated historical period:
+               Error e_i = DayAheadForecast_i - Actual_i (positive = forecast exceeded actual = wind shortfall)
+               Shortfall S_i = max(0.0, e_i)
+           The empirical risk buffer is calibrated on all evaluated periods across the distribution of shortfalls.
+        3. Capacity-Constrained Realization:
+           - Theoretical Recommendation: Total_unconstrained = Base_residual + Buffer_target
+           - Fleet Constraint: Total_procured = min(Total_unconstrained, Capacity_max)
+           - Effective Buffer: B_effective = max(0.0, Total_procured - Base_residual)
+           - Capacity Deficit: If Capacity_max < Base_residual, the plant cannot even meet deterministic
+             demand, leaving an unserved base deficit of (Base_residual - Capacity_max) MW.
+           - Delivered Risk: Residual shortfall risk is evaluated strictly on the physical
+             capacity-constrained commitment, ensuring risk is never deceptively masked.
+        4. Imbalance Economics (Asymmetric Cashout):
+           - Cashout Penalty Spread: (SBP - DA_price) incurred on unhedged deficit MWh.
+           - Buffer Carry Spread: (CCGT_cost - DA_price) incurred on committed thermal reserve MWh.
+           - Net Value Add: Unbuffered Cost - Buffered Cost (unclamped; can be negative if buffer carry
+             exceeds avoided cashout penalties).
         """
+        if df.empty:
+            raise ValueError("Cannot calculate thermal procurement on empty dataset.")
+
         demand = max(0.0, float(request.expectedDemandMw))
         actual_outturn = None
         period_label = None
+        is_hist_available = True
+        quality_notice = None
 
         # Determine reference wind forecast based on request
         if request.targetDate and request.settlementPeriod:
@@ -360,20 +389,38 @@ class AnalyticsService:
                 (df["settlementDate"] == request.targetDate) &
                 (df["settlementPeriod"] == request.settlementPeriod)
             ]
-            if not matched.empty:
-                row = matched.iloc[0]
-                wind_fct = float(row["dayAheadForecastMw"]) if pd.notna(row["dayAheadForecastMw"]) else float(df["dayAheadForecastMw"].dropna().mean())
-                actual_outturn = float(row["actualMw"])
-                total_start_mins = (int(request.settlementPeriod) - 1) * 30
-                sh = total_start_mins // 60
-                sm = total_start_mins % 60
-                eh = (total_start_mins + 30) // 60
-                em = (total_start_mins + 30) % 60
-                period_label = f"{request.targetDate} SP {request.settlementPeriod} ({sh:02d}:{sm:02d} - {eh:02d}:{em:02d} UTC)"
-            else:
+            total_start_mins = (int(request.settlementPeriod) - 1) * 30
+            sh = total_start_mins // 60
+            sm = total_start_mins % 60
+            eh = (total_start_mins + 30) // 60
+            em = (total_start_mins + 30) % 60
+            base_label = f"{request.targetDate} SP {request.settlementPeriod} ({sh:02d}:{sm:02d} - {eh:02d}:{em:02d} UTC)"
+
+            if matched.empty:
+                is_hist_available = False
+                quality_notice = f"Interval {request.targetDate} SP {request.settlementPeriod} not found in January 2026 dataset."
                 wind_fct = request.windForecastMw if request.windForecastMw is not None else float(df["dayAheadForecastMw"].dropna().mean())
+                period_label = f"{base_label} [INTERVAL NOT FOUND - Fallback Used]"
+            else:
+                row = matched.iloc[0]
+                actual_outturn = float(row["actualMw"]) if pd.notna(row["actualMw"]) else None
+                if pd.notna(row["dayAheadForecastMw"]):
+                    wind_fct = float(row["dayAheadForecastMw"])
+                    is_hist_available = True
+                    period_label = base_label
+                else:
+                    # Lookahead prevention: No forecast published prior to cutoff for this interval!
+                    is_hist_available = False
+                    quality_notice = (
+                        f"No eligible Day-Ahead forecast was published prior to 11:00 UTC D-1 cutoff "
+                        f"for {request.targetDate} SP {request.settlementPeriod}. Using diurnal SP average as an estimate."
+                    )
+                    sp_data = df[(df["settlementPeriod"] == request.settlementPeriod) & df["dayAheadForecastMw"].notna()]
+                    wind_fct = float(sp_data["dayAheadForecastMw"].mean()) if not sp_data.empty else float(df["dayAheadForecastMw"].dropna().mean())
+                    period_label = f"{base_label} [NO PRE-CUTOFF FORECAST - Diurnal Estimate]"
         elif request.windForecastMw is not None:
             wind_fct = float(request.windForecastMw)
+            period_label = f"User Specified Wind Forecast ({wind_fct:,.0f} MW)"
         elif request.settlementPeriod is not None:
             sp_data = df[(df["settlementPeriod"] == request.settlementPeriod) & df["dayAheadForecastMw"].notna()]
             wind_fct = float(sp_data["dayAheadForecastMw"].mean()) if not sp_data.empty else float(df["dayAheadForecastMw"].dropna().mean())
@@ -385,8 +432,8 @@ class AnalyticsService:
         # Deterministic Base Residual Thermal: Demand - Wind Forecast
         base_residual = max(0.0, demand - wind_fct)
 
-        # Empirical wind shortfall errors:
-        # A shortfall occurs when actual < forecast (i.e. dayAheadForecastMw - actualMw > 0)
+        # Empirical wind shortfall errors across all valid intervals:
+        # Shortfall occurs when actual < forecast (i.e. dayAheadForecastMw - actualMw > 0)
         valid_df = df[df["dayAheadForecastMw"].notna()]
         if not valid_df.empty:
             errors = (valid_df["dayAheadForecastMw"] - valid_df["actualMw"]).to_numpy()
@@ -395,44 +442,73 @@ class AnalyticsService:
 
         shortfalls = np.maximum(0.0, errors)
 
-        # Quantile buffer based on requested confidence level (default P90)
-        target_quantile = request.riskConfidenceLevel * 100.0
+        # Target quantile risk buffer (default P90 across all historical intervals)
+        target_quantile = min(0.99, max(0.50, float(request.riskConfidenceLevel))) * 100.0
         risk_buffer_mw = float(np.percentile(shortfalls, target_quantile))
 
         # Unconstrained recommended total commitment
         unconstrained_thermal = round(base_residual + risk_buffer_mw, 2)
 
-        # Capacity Capping
+        # Capacity Capping & Unserved Deficit Analysis
         is_constrained = False
+        is_below_base = False
+        unserved_base_deficit = 0.0
+
         if request.maxThermalCapacityMw is not None and request.maxThermalCapacityMw > 0:
-            if unconstrained_thermal > request.maxThermalCapacityMw:
-                recommended_total_thermal = float(request.maxThermalCapacityMw)
+            c_max = float(request.maxThermalCapacityMw)
+            if unconstrained_thermal > c_max:
+                recommended_total_thermal = c_max
                 is_constrained = True
             else:
                 recommended_total_thermal = unconstrained_thermal
+
+            if c_max < base_residual:
+                is_below_base = True
+                unserved_base_deficit = round(base_residual - c_max, 2)
         else:
             recommended_total_thermal = unconstrained_thermal
 
-        # Deficit probabilities
+        # Effective Risk Buffer actually delivered after fleet capacity limits
+        effective_buffer_mw = max(0.0, recommended_total_thermal - base_residual)
+
+        # Deficit probabilities:
+        # Unbuffered deficit probability: probability of wind error > 0
         unbuffered_deficit_prob = float(np.mean(errors > 0) * 100.0) if len(errors) > 0 else 50.0
-        buffered_deficit_prob = float(np.mean(shortfalls > risk_buffer_mw) * 100.0) if len(shortfalls) > 0 else 10.0
+
+        # Buffered deficit probability: evaluated strictly on what capacity can deliver!
+        # When thermal commitment = Total_procured, shortfall exceeds buffer if S_i > (Total_procured - Base_residual)
+        net_buffer_allowance = recommended_total_thermal - base_residual
+        if len(shortfalls) > 0:
+            buffered_deficit_prob = float(np.mean(shortfalls > net_buffer_allowance) * 100.0)
+        else:
+            buffered_deficit_prob = 10.0
 
         # Financial benchmarks (£/MWh)
         sbp = float(request.systemBuyPriceGbp if request.systemBuyPriceGbp is not None else settings.DEFAULT_SYSTEM_BUY_PRICE_GBP)
         ccgt_cost = float(request.ccgtMarginalCostGbp if request.ccgtMarginalCostGbp is not None else settings.DEFAULT_CCGT_MARGINAL_COST_GBP)
         da_price = float(request.dayAheadPowerPriceGbp if request.dayAheadPowerPriceGbp is not None else settings.DEFAULT_DAY_AHEAD_POWER_PRICE_GBP)
 
-        # Energy conversion: 30-minute settlement period = 0.5 hours (1 MW = 0.5 MWh)
-        expected_deficit_mw = float(np.mean(shortfalls))
-        unbuffered_cost = expected_deficit_mw * 0.5 * max(0.0, (sbp - da_price))
+        # Spreads (£/MWh):
+        # Deficit cashout penalty spread: SBP - DA_price (extra penalty over day-ahead power price)
+        penalty_spread = max(0.0, sbp - da_price)
+        # Carry cost spread: CCGT_cost - DA_price (extra cost to run thermal vs day-ahead power purchase)
+        carry_spread = max(0.0, ccgt_cost - da_price)
 
-        residual_shortfalls = np.maximum(0.0, shortfalls - risk_buffer_mw)
-        expected_residual_deficit_mw = float(np.mean(residual_shortfalls))
-        residual_penalty = expected_residual_deficit_mw * 0.5 * max(0.0, (sbp - da_price))
-        buffer_carry_cost = risk_buffer_mw * 0.5 * max(0.0, (ccgt_cost - da_price))
-        buffered_cost = residual_penalty + buffer_carry_cost
+        # Settlement period duration: 30 minutes = 0.5 hours (1 MW = 0.5 MWh)
+        expected_shortfall_mw = float(np.mean(shortfalls))
+        unbuffered_cost = expected_shortfall_mw * 0.5 * penalty_spread
 
-        net_value_add = max(0.0, unbuffered_cost - buffered_cost)
+        # Residual shortfall after applying capacity-constrained thermal procurement
+        residual_shortfalls = np.maximum(0.0, shortfalls - net_buffer_allowance)
+        expected_residual_shortfall_mw = float(np.mean(residual_shortfalls))
+        residual_penalty_cost = expected_residual_shortfall_mw * 0.5 * penalty_spread
+
+        # Buffer carry cost incurred on the thermal reserve actually held
+        buffer_carry_cost = effective_buffer_mw * 0.5 * carry_spread
+        buffered_cost = residual_penalty_cost + buffer_carry_cost
+
+        # Net economic value add: Unclamped! Preserves negative return if buffer carry exceeds penalty
+        net_value_add = unbuffered_cost - buffered_cost
 
         # Stress-Testing Sensitivity Matrix (£100 to £350/MWh)
         scenarios = [
@@ -443,9 +519,10 @@ class AnalyticsService:
         ]
         sensitivity_list = []
         for stress_sbp, label in scenarios:
-            unbuf_stress = expected_deficit_mw * 0.5 * max(0.0, (stress_sbp - da_price))
-            buf_stress = (expected_residual_deficit_mw * 0.5 * max(0.0, (stress_sbp - da_price))) + buffer_carry_cost
-            savings = max(0.0, unbuf_stress - buf_stress)
+            stress_penalty_spread = max(0.0, stress_sbp - da_price)
+            unbuf_stress = expected_shortfall_mw * 0.5 * stress_penalty_spread
+            buf_stress = (expected_residual_shortfall_mw * 0.5 * stress_penalty_spread) + buffer_carry_cost
+            savings = unbuf_stress - buf_stress  # Unclamped!
             var_reduction = ((unbuf_stress - buf_stress) / unbuf_stress * 100.0) if unbuf_stress > 0 else 0.0
             sensitivity_list.append(
                 CashoutSensitivityScenario(
@@ -459,14 +536,20 @@ class AnalyticsService:
             )
 
         # Operational Rationale for the Trading Desk
-        cap_note = f" (Capped by fleet limit of {request.maxThermalCapacityMw:,.0f} MW)" if is_constrained else ""
+        cap_note = ""
+        if is_below_base:
+            cap_note = f" [CRITICAL: Fleet capacity {request.maxThermalCapacityMw:,.0f} MW is below base residual by {unserved_base_deficit:,.0f} MW]"
+        elif is_constrained:
+            cap_note = f" [CAPACITY CAPPED: Fleet limit of {request.maxThermalCapacityMw:,.0f} MW caps buffer to {effective_buffer_mw:,.0f} MW]"
+
         rationale = (
             f"Under consumer demand of {demand:,.0f} MW and a Day-Ahead wind forecast of {wind_fct:,.0f} MW, "
             f"deterministic residual requirement is {base_residual:,.0f} MW. Empirical January 2026 outturns "
             f"indicate a {unbuffered_deficit_prob:.1f}% probability of wind deficit. Applying an empirical P{int(target_quantile)} "
-            f"safety buffer (+{risk_buffer_mw:,.0f} MW) compresses shortfall risk to {buffered_deficit_prob:.1f}%, recommending "
-            f"a total commitment of {recommended_total_thermal:,.0f} MW{cap_note}. At £{sbp:.2f}/MWh SBP, this yields an estimated "
-            f"net risk-adjusted saving of £{net_value_add:,.2f} for this 30-minute settlement period (0.5 MWh conversion)."
+            f"safety buffer (+{risk_buffer_mw:,.0f} MW theoretical, +{effective_buffer_mw:,.0f} MW delivered) "
+            f"adjusts shortfall risk to {buffered_deficit_prob:.1f}%, recommending a total commitment of {recommended_total_thermal:,.0f} MW{cap_note}. "
+            f"At £{sbp:.2f}/MWh SBP, net risk-adjusted benefit is {'+' if net_value_add >= 0 else ''}£{net_value_add:,.2f} "
+            f"for this 30-minute settlement period (0.5 MWh conversion)."
         )
 
         return ThermalProcurementResponse(
@@ -474,11 +557,16 @@ class AnalyticsService:
             windForecastMw=round(wind_fct, 2),
             actualOutturnMw=round(actual_outturn, 2) if actual_outturn is not None else None,
             selectedPeriodLabel=period_label,
+            isHistoricalForecastAvailable=is_hist_available,
+            historicalDataQualityNotice=quality_notice,
             baseResidualThermalMw=round(base_residual, 2),
             recommendedRiskBufferMw=round(risk_buffer_mw, 2),
+            effectiveRiskBufferMw=round(effective_buffer_mw, 2),
             recommendedTotalThermalMw=recommended_total_thermal,
             isCapacityConstrained=is_constrained,
+            isCapacityBelowBaseResidual=is_below_base,
             unconstrainedTotalThermalMw=unconstrained_thermal if is_constrained else None,
+            unservedBaseDeficitMw=unserved_base_deficit,
             unbufferedDeficitRiskPct=round(unbuffered_deficit_prob, 2),
             bufferedDeficitRiskPct=round(buffered_deficit_prob, 2),
             expectedImbalanceCostUnbuffered=round(unbuffered_cost, 2),

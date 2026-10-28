@@ -12,27 +12,45 @@ Exposes high-performance analytical endpoints for the frontend client:
 - Decision Tool: Residual thermal procurement calculator with dynamic risk buffering.
 """
 
-from typing import Optional, List
-from fastapi import APIRouter, Query, HTTPException, Response
+from datetime import datetime
+from typing import List, Optional
+
 import pandas as pd
-import numpy as np
+from fastapi import APIRouter, HTTPException, Query, Response
 
 from app.schemas.forecast import (
-    TimeSeriesResponse,
+    DailyErrorMetric,
+    DatasetMetadata,
+    DataSourceType,
+    ErrorDistribution,
     ForecastDataPoint,
     KPIMetrics,
-    ErrorDistribution,
-    DailyErrorMetric,
     SettlementPeriodProfile,
     ThermalProcurementRequest,
     ThermalProcurementResponse,
-    DatasetMetadata,
-    DataSourceType
+    TimeSeriesResponse,
 )
-from app.services.elexon_service import elexon_service
 from app.services.analytics_service import analytics_service
+from app.services.elexon_service import elexon_service
 
 router = APIRouter()
+
+
+def _validate_date_range(start_date: Optional[str], end_date: Optional[str]) -> None:
+    """Validates date format and chronological ordering."""
+    if start_date:
+        try:
+            d_start = datetime.strptime(start_date, "%Y-%m-%d").date()
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid startDate format. Expected YYYY-MM-DD.")
+    if end_date:
+        try:
+            d_end = datetime.strptime(end_date, "%Y-%m-%d").date()
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid endDate format. Expected YYYY-MM-DD.")
+    if start_date and end_date:
+        if d_start > d_end:
+            raise HTTPException(status_code=400, detail="startDate cannot be after endDate.")
 
 
 def get_dataset(force_refresh: bool = False) -> tuple[pd.DataFrame, DatasetMetadata]:
@@ -65,6 +83,7 @@ def get_timeseries(
     Returns the time-series of half-hourly wind generation actuals and Day-Ahead forecasts.
     Guaranteed lookahead-free: Day-Ahead forecast strictly precedes 11:00 UTC D-1 Auction Deadline.
     """
+    _validate_date_range(startDate, endDate)
     df, meta = get_dataset(force_refresh=forceRefresh)
 
     filtered_df = df.copy()
@@ -73,7 +92,7 @@ def get_timeseries(
     if endDate:
         filtered_df = filtered_df[filtered_df["settlementDate"] <= endDate]
     if peakOnly:
-        filtered_df = filtered_df[filtered_df["isPeak"] == True]
+        filtered_df = filtered_df[filtered_df["isPeak"]]
     if settlementPeriod:
         filtered_df = filtered_df[filtered_df["settlementPeriod"] == settlementPeriod]
 
@@ -110,7 +129,7 @@ def get_timeseries(
 
     # Determine status string for backward compatibility
     status_label = "Connected to Elexon BMRS" if meta.source == DataSourceType.ELEXON_LIVE else (
-        "Local Cache (Validated Engine)" if meta.source == DataSourceType.CACHE else
+        "Local Cache (Validated Engine)" if meta.isCached and meta.source != DataSourceType.SYNTHETIC_DEMO else
         "Demonstration Dataset (Simulated Fallback)"
     )
 
@@ -118,15 +137,17 @@ def get_timeseries(
         status=status_label,
         source=meta.source,
         isSynthetic=meta.isSynthetic,
+        isCached=meta.isCached,
         warning=meta.warning,
         lastUpdatedAt=meta.lastUpdatedAt,
         cutoffRule=meta.cutoffRule,
-        startDate=str(filtered_df["settlementDate"].min()) if not filtered_df.empty else "2026-01-01",
-        endDate=str(filtered_df["settlementDate"].max()) if not filtered_df.empty else "2026-01-31",
+        startDate=str(filtered_df["settlementDate"].min()) if not filtered_df.empty else (startDate or "2026-01-01"),
+        endDate=str(filtered_df["settlementDate"].max()) if not filtered_df.empty else (endDate or "2026-01-31"),
         totalRecords=len(data_points),
         validRecords=valid_count,
         coveragePct=coverage_pct,
         empiricalCoverageP10P90Pct=meta.empiricalCoverageP10P90Pct,
+        empiricalCoverageSampleCount=meta.empiricalCoverageSampleCount,
         data=data_points
     )
 
@@ -139,12 +160,16 @@ def get_kpis(
     """
     Calculates executive-level forecast scorecard metrics (MAE, RMSE, Bias, Peak vs Off-Peak).
     """
+    _validate_date_range(startDate, endDate)
     df, _ = get_dataset()
     filtered_df = df.copy()
     if startDate:
         filtered_df = filtered_df[filtered_df["settlementDate"] >= startDate]
     if endDate:
         filtered_df = filtered_df[filtered_df["settlementDate"] <= endDate]
+
+    if filtered_df.empty:
+        raise HTTPException(status_code=404, detail="No settlement data matching the specified date filters.")
 
     return analytics_service.calculate_kpis(filtered_df)
 
@@ -159,12 +184,16 @@ def get_error_distribution(
     Returns non-parametric error quantiles (P10, P50, P90) and frequency histogram
     for tail-risk analysis.
     """
+    _validate_date_range(startDate, endDate)
     df, _ = get_dataset()
     filtered_df = df.copy()
     if startDate:
         filtered_df = filtered_df[filtered_df["settlementDate"] >= startDate]
     if endDate:
         filtered_df = filtered_df[filtered_df["settlementDate"] <= endDate]
+
+    if filtered_df.empty:
+        raise HTTPException(status_code=404, detail="No settlement data matching the specified date filters.")
 
     return analytics_service.calculate_error_distribution(filtered_df, num_bins=numBins)
 

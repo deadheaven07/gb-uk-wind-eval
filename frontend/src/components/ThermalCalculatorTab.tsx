@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Calculator,
   ShieldCheck,
@@ -9,7 +9,8 @@ import {
   Calendar,
   BarChart3,
   HelpCircle,
-  ShieldAlert
+  ShieldAlert,
+  AlertTriangle
 } from 'lucide-react';
 import { ThermalProcurementRequest, ThermalProcurementResponse } from '../types';
 import { api } from '../api/client';
@@ -38,7 +39,11 @@ export const ThermalCalculatorTab: React.FC<ThermalCalculatorTabProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
 
+  // Request sequencing ref to guarantee latest-request-wins
+  const latestRequestId = useRef<number>(0);
+
   const runCalculation = async () => {
+    const thisRequestId = ++latestRequestId.current;
     setIsLoading(true);
     setError(null);
     try {
@@ -54,14 +59,18 @@ export const ThermalCalculatorTab: React.FC<ThermalCalculatorTabProps> = ({
         dayAheadPowerPriceGbp: daPrice,
       };
       const res = await api.calculateThermalProcurement(payload);
-      setResult(res);
-      if (mode === 'historical' && res.windForecastMw) {
-        setWindMw(res.windForecastMw);
+      // Strictly prevent out-of-order responses from overwriting latest inputs
+      if (thisRequestId === latestRequestId.current) {
+        setResult(res);
       }
     } catch (err: any) {
-      setError(err.message || 'Failed to calculate thermal procurement');
+      if (thisRequestId === latestRequestId.current) {
+        setError(err.message || 'Failed to calculate thermal procurement');
+      }
     } finally {
-      setIsLoading(false);
+      if (thisRequestId === latestRequestId.current) {
+        setIsLoading(false);
+      }
     }
   };
 
@@ -382,7 +391,7 @@ export const ThermalCalculatorTab: React.FC<ThermalCalculatorTabProps> = ({
 
                   {/* If historical outturn is available, show the replay callout */}
                   {result.actualOutturnMw !== null && result.actualOutturnMw !== undefined && (
-                    <div className="mb-4 p-2.5 rounded-lg bg-slate-100 border border-slate-200 flex items-center justify-between text-xs font-mono">
+                    <div className="mb-3 p-2.5 rounded-lg bg-slate-100 border border-slate-200 flex items-center justify-between text-xs font-mono">
                       <span className="text-slate-600 font-sans">Historical Actual Outturn:</span>
                       <strong className="text-blue-900 font-bold">{result.actualOutturnMw.toLocaleString()} MW</strong>
                       <span className="text-slate-600 font-sans border-l pl-3 border-slate-300">Outturn Delta:</span>
@@ -393,11 +402,31 @@ export const ThermalCalculatorTab: React.FC<ThermalCalculatorTabProps> = ({
                     </div>
                   )}
 
+                  {/* Historical Missing Pre-Cutoff Forecast Notice */}
+                  {result.isHistoricalForecastAvailable === false && result.historicalDataQualityNotice && (
+                    <div className="mb-3 p-2.5 rounded-lg bg-amber-50 border border-amber-300 text-amber-900 text-xs flex items-start gap-2 font-medium">
+                      <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
+                      <div>
+                        <strong>Forecast Provenance Notice:</strong> {result.historicalDataQualityNotice}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Critical Capacity Below Base Residual Warning */}
+                  {result.isCapacityBelowBaseResidual && (
+                    <div className="mb-3 p-2.5 rounded-lg bg-rose-50 border border-rose-300 text-rose-900 text-xs flex items-start gap-2 font-medium">
+                      <AlertCircle className="h-4 w-4 text-rose-600 shrink-0 mt-0.5" />
+                      <div>
+                        <strong>Critical Fleet Capacity Deficit:</strong> Fleet capacity limit ({maxCapacity?.toLocaleString()} MW) is strictly below the deterministic base residual requirement ({result.baseResidualThermalMw.toLocaleString()} MW). An unserved deficit of {result.unservedBaseDeficitMw?.toLocaleString()} MW will be exposed directly to real-time cashout penalties.
+                      </div>
+                    </div>
+                  )}
+
                   {/* Capacity Capping Alert */}
-                  {result.isCapacityConstrained && (
+                  {result.isCapacityConstrained && !result.isCapacityBelowBaseResidual && (
                     <div className="mb-3 p-2 rounded-lg bg-amber-50 border border-amber-300 text-amber-900 text-xs flex items-center gap-2 font-medium">
                       <ShieldAlert className="h-4 w-4 text-amber-600 shrink-0" />
-                      <span>Capped at maximum fleet capacity ({maxCapacity?.toLocaleString()} MW). Unconstrained requirement was {result.unconstrainedTotalThermalMw?.toLocaleString()} MW.</span>
+                      <span>Capped at maximum fleet capacity ({maxCapacity?.toLocaleString()} MW). Unconstrained requirement was {result.unconstrainedTotalThermalMw?.toLocaleString()} MW. Delivered buffer is {result.effectiveRiskBufferMw?.toLocaleString()} MW.</span>
                     </div>
                   )}
 
@@ -474,8 +503,8 @@ export const ThermalCalculatorTab: React.FC<ThermalCalculatorTabProps> = ({
 
                     <div>
                       <span className="text-slate-500 block text-[10px]">Net Risk-Adjusted Value:</span>
-                      <span className="font-bold text-blue-700 text-sm">
-                        +£{result.netValueAddGbp.toLocaleString()}
+                      <span className={`font-bold text-sm ${result.netValueAddGbp >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
+                        {result.netValueAddGbp >= 0 ? '+' : ''}£{result.netValueAddGbp.toLocaleString()}
                       </span>
                     </div>
                   </div>
@@ -523,8 +552,8 @@ export const ThermalCalculatorTab: React.FC<ThermalCalculatorTabProps> = ({
                             <td className="py-2.5 px-3 text-right font-mono text-slate-800 font-semibold">
                               £{scen.bufferedCostGbp.toLocaleString()}
                             </td>
-                            <td className="py-2.5 px-3 text-right font-mono font-bold text-emerald-700">
-                              +£{scen.netSavingsGbp.toLocaleString()}
+                            <td className={`py-2.5 px-3 text-right font-mono font-bold ${scen.netSavingsGbp >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
+                              {scen.netSavingsGbp >= 0 ? '+' : ''}£{scen.netSavingsGbp.toLocaleString()}
                             </td>
                             <td className="py-2.5 px-3 text-right">
                               <span className="px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-800 font-bold border border-emerald-200 text-[11px]">

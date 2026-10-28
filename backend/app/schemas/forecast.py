@@ -1,5 +1,6 @@
 from enum import Enum
-from typing import List, Optional, Dict
+from typing import List, Optional
+
 from pydantic import BaseModel, Field
 
 
@@ -115,8 +116,9 @@ class DatasetMetadata(BaseModel):
     """
     Dataset provenance, coverage, and calibration metadata.
     """
-    source: DataSourceType = Field(..., description="Data provenance: ELEXON_LIVE, CACHE, SYNTHETIC_DEMO, or UNAVAILABLE")
+    source: DataSourceType = Field(..., description="Original data provenance: ELEXON_LIVE, SYNTHETIC_DEMO, or UNAVAILABLE")
     isSynthetic: bool = Field(False, description="True if simulated demonstration data is active")
+    isCached: bool = Field(False, description="True if loaded from persistent local cache storage")
     warning: Optional[str] = Field(None, description="Active warning or notice regarding data source")
     lastUpdatedAt: Optional[str] = Field(None, description="ISO UTC timestamp of last dataset refresh")
     cutoffRule: str = Field("11:00 UTC D-1 Day-Ahead Auction Deadline", description="Auction deadline policy applied")
@@ -126,6 +128,7 @@ class DatasetMetadata(BaseModel):
     validRecords: int
     coveragePct: float = Field(100.0, description="Percentage of intervals with eligible Day-Ahead forecast")
     empiricalCoverageP10P90Pct: Optional[float] = Field(None, description="Observed percentage of actuals falling within the empirical P10-P90 corridor")
+    empiricalCoverageSampleCount: Optional[int] = Field(None, description="Number of valid intervals evaluated for corridor coverage")
 
 
 class TimeSeriesResponse(BaseModel):
@@ -135,6 +138,7 @@ class TimeSeriesResponse(BaseModel):
     status: str = Field(..., description="Human-readable status label")
     source: DataSourceType = Field(DataSourceType.CACHE, description="Structured source classification")
     isSynthetic: bool = Field(False, description="Flag indicating synthetic demonstration data")
+    isCached: bool = Field(False, description="Flag indicating data loaded from local cache")
     warning: Optional[str] = Field(None, description="Active warning message if synthetic or degraded")
     lastUpdatedAt: Optional[str] = Field(None, description="Timestamp of data generation or fetch")
     cutoffRule: str = Field(..., description="Gate closure policy applied (e.g., '11:00 UTC D-1')")
@@ -144,6 +148,7 @@ class TimeSeriesResponse(BaseModel):
     validRecords: int = Field(..., description="Number of periods with non-missing forecasts")
     coveragePct: float = Field(100.0, description="Forecast data coverage percentage")
     empiricalCoverageP10P90Pct: Optional[float] = Field(None, description="Corridor coverage score")
+    empiricalCoverageSampleCount: Optional[int] = Field(None, description="Sample count evaluated for empirical coverage")
     data: List[ForecastDataPoint]
 
 
@@ -185,16 +190,21 @@ class ThermalProcurementResponse(BaseModel):
     windForecastMw: float
     actualOutturnMw: Optional[float] = Field(None, description="Actual wind outturn recorded if a specific historical period was selected (MW)")
     selectedPeriodLabel: Optional[str] = Field(None, description="Descriptive label of the evaluated half-hour block")
+    isHistoricalForecastAvailable: bool = Field(True, description="True if a genuine pre-cutoff forecast existed for the target interval")
+    historicalDataQualityNotice: Optional[str] = Field(None, description="Notice if historical forecast was missing or estimated")
     baseResidualThermalMw: float = Field(..., description="Deterministic residual requirement: Demand - Wind Forecast (MW)")
-    recommendedRiskBufferMw: float = Field(..., description="Quantified risk buffer derived from empirical wind forecast tail error (MW)")
+    recommendedRiskBufferMw: float = Field(..., description="Theoretical risk buffer derived from empirical wind forecast tail error (MW)")
+    effectiveRiskBufferMw: float = Field(..., description="Actual risk buffer delivered after thermal fleet capacity limits (MW)")
     recommendedTotalThermalMw: float = Field(..., description="Recommended Day-Ahead thermal procurement commitment (MW)")
     isCapacityConstrained: bool = Field(False, description="True if procurement was capped by maximum plant capacity")
-    unconstrainedTotalThermalMw: Optional[float] = Field(None, description="Procurement before capacity capping")
+    isCapacityBelowBaseResidual: bool = Field(False, description="True if available thermal capacity cannot even meet deterministic base residual")
+    unconstrainedTotalThermalMw: Optional[float] = Field(None, description="Theoretical procurement before capacity capping (MW)")
+    unservedBaseDeficitMw: float = Field(0.0, description="Unserved base deficit if capacity is below base residual (MW)")
     unbufferedDeficitRiskPct: float = Field(..., description="Probability of wind generation shortfall under naive 0-buffer strategy (%)")
-    bufferedDeficitRiskPct: float = Field(..., description="Residual probability of under-procurement under recommended buffer (%)")
+    bufferedDeficitRiskPct: float = Field(..., description="Residual probability of under-procurement under capacity-constrained commitment (%)")
     expectedImbalanceCostUnbuffered: float = Field(..., description="Expected settlement period cashout loss under naive procurement (£)")
     expectedImbalanceCostBuffered: float = Field(..., description="Expected settlement period cashout cost with Gridbricks risk buffer (£)")
-    netValueAddGbp: float = Field(..., description="Estimated net monetary savings per half-hour settlement period (£)")
+    netValueAddGbp: float = Field(..., description="Estimated net monetary savings per half-hour settlement period (£). Can be negative if buffer carry cost exceeds avoided cashout.")
     hedgingRationale: str = Field(..., description="Executive operational rationale and trading instructions for the desk")
     sensitivityScenarios: List[CashoutSensitivityScenario] = Field(default_factory=list, description="Stress-testing cashout sensitivity matrix (£100-£350/MWh)")
 

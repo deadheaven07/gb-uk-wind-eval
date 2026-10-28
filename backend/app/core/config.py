@@ -1,6 +1,7 @@
 import os
-from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import List
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -28,11 +29,16 @@ class Settings(BaseSettings):
     ELEXON_FUELHH_URL: str = "https://data.elexon.co.uk/bmrs/api/v1/datasets/FUELHH/stream"
     ELEXON_WINDFOR_URL: str = "https://data.elexon.co.uk/bmrs/api/v1/datasets/WINDFOR/stream"
 
-    # Day-Ahead Auction Deadline vs Intraday Gate Closure Specification:
-    # 1. Day-Ahead wholesale power market auction (EPEX SPOT & Nord Pool UK) order books
-    #    close strictly at 11:00 UTC on Day D-1 (the decision deadline for day-ahead procurement).
-    # 2. Balancing Mechanism (BM) physical Gate Closure occurs strictly 1 hour (60 min)
-    #    prior to the start of each individual half-hour settlement period on Day D.
+    # Day-Ahead Auction Deadline vs Balancing Mechanism Gate Closure:
+    # 1. Day-Ahead Wholesale Power Auctions:
+    #    In Great Britain, wholesale day-ahead exchange auctions (EPEX SPOT UK 60-minute auction
+    #    and Nord Pool UK Day-Ahead auction) close order books strictly at 11:00 GMT / 11:00 UTC
+    #    on Day D-1 (the day prior to delivery). This is the key commercial decision deadline for
+    #    day-ahead dispatchable thermal procurement and base schedule commitment.
+    #    Note: In summer (BST), 11:00 GMT corresponds to 12:00 BST; in winter (January), GMT == UTC.
+    # 2. Balancing Mechanism (BM) Physical Gate Closure:
+    #    Under BSC Section P, physical notifications (FPNs) for each individual 30-minute settlement
+    #    period lock strictly 1 hour (60 minutes) prior to the settlement period start time on Day D.
     DAY_AHEAD_CUTOFF_HOUR_UTC: int = 11
     DAY_AHEAD_CUTOFF_MINUTE_UTC: int = 0
     INTRADAY_GATE_CLOSURE_MINUTES: int = 60
