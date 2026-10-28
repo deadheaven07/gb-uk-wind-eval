@@ -6,6 +6,14 @@
 [![React 18](https://img.shields.io/badge/React-18-61dafb.svg)](https://reactjs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.2+-3178c6.svg)](https://www.typescriptlang.org/)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
+[![Live Demo](https://img.shields.io/badge/Vercel-Live_App-black?logo=vercel)](https://assignment-grid-bricks.vercel.app/)
+[![Backend API](https://img.shields.io/badge/Render-API_Online-46e3b7?logo=render)](https://gridbricks-reint-backend.onrender.com/health)
+
+> **Live Deployment Links:**
+> * **Production Web Application (Vercel)**: [https://assignment-grid-bricks.vercel.app](https://assignment-grid-bricks.vercel.app)
+> * **Production API Backend (Render)**: [https://gridbricks-reint-backend.onrender.com](https://gridbricks-reint-backend.onrender.com)
+> * **Interactive API Documentation (Swagger/OpenAPI)**: [https://gridbricks-reint-backend.onrender.com/docs](https://gridbricks-reint-backend.onrender.com/docs)
+> * **Backend Health & Market Status**: [https://gridbricks-reint-backend.onrender.com/health](https://gridbricks-reint-backend.onrender.com/health)
 
 > **Production-grade Energy Decision Intelligence Platform** engineered for UK wholesale electricity trading desks. Evaluates Day-Ahead wind generation forecast accuracy against actual outturns (Elexon BMRS), computes causal non-parametric prediction intervals without forward look-ahead leakage, and automates capacity-constrained, risk-buffered dispatchable thermal power procurement to safeguard trading portfolios against asymmetric balancing mechanism cashout penalties.
 
@@ -288,5 +296,10 @@ In compliance with modern engineering governance and transparent submission prac
 
 ## 8. Deployment and Walkthrough Deliverables
 
+- **Live Production Deployment**:
+  - **Frontend Application (Vercel)**: [https://assignment-grid-bricks.vercel.app](https://assignment-grid-bricks.vercel.app)
+  - **Backend REST API (Render)**: [https://gridbricks-reint-backend.onrender.com](https://gridbricks-reint-backend.onrender.com)
+  - **Live OpenAPI Documentation**: [https://gridbricks-reint-backend.onrender.com/docs](https://gridbricks-reint-backend.onrender.com/docs)
+  - **Service Health Monitoring**: [https://gridbricks-reint-backend.onrender.com/health](https://gridbricks-reint-backend.onrender.com/health)
 - **Local Execution**: The application runs out of the box via Docker Compose (`docker compose up --build`) or bare metal (FastAPI on `:8000` + Vite on `:5173`).
-- **Cloud Deployment & Video Demo**: Staged for final submission evaluation. All architectural prerequisites (containerized multi-stage Dockerfiles, Nginx SPA proxying, environment configurations, and health checks) are fully verified and production-ready.
+- **Video Walkthrough Deliverable**: Comprehensive 10-minute presentation guide prepared in [`docs/VIDEO_DEMO_SCRIPT.md`](docs/VIDEO_DEMO_SCRIPT.md) featuring Part 1 (Client Pilot Pitch, max 5 min) and Part 2 (Technical Lead Architecture Review, max 5 min).
